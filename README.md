@@ -7,3 +7,11 @@ The system contains a small food database that includes popular Hong Kong dishes
 The program is implemented using Object-Oriented Programming (OOP) concepts such as classes, objects, encapsulation, and modular programming. The system is divided into multiple Python modules to improve organization and readability. Each class is responsible for a specific task, such as managing user information, storing food data, maintaining the food database, and tracking the user’s daily calorie intake.
 
 The HK Calorie Tracker demonstrates how programming concepts and data structures can be used to build a simple real-life health monitoring system.
+
+## Team
+
+Mohamed Mohideen Dawood(13776731)
+
+Wu Chun Yin(13879841 )
+
+Pun Anjuli(13880208)
