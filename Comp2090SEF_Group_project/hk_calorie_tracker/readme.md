@@ -33,3 +33,11 @@ tracker.py – Manages the daily food log and calculates total calories
 ## Programming Language
 
 Python
+
+## Teammates
+
+Mohamed Mohideen Dawood(13776731)
+
+Wu Chun Yin(13879841 )
+
+Pun Anjuli(13880208)
