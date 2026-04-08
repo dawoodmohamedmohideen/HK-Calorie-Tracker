@@ -1,43 +1,76 @@
 # HK Calorie Tracker
 
-This application allows users to track their daily calorie intake based on common Hong Kong foods.
-It is implemented using Object-Oriented Programming (OOP) and modular Python files.
+HK Calorie Tracker is a modular Python project for recording daily calorie intake based on common Hong Kong food items.
 
-## Features (Preliminary Version)
+This repository now supports:
+- a CLI application (original flow),
+- a Flask backend API,
+- and a Streamlit frontend that sends requests to the Flask backend.
 
-* Food database containing HK food items
-* Add food items to a daily log
-* Calculate total calories consumed
-* Display foods eaten during the day
+## Architecture
 
-## OOP Concepts Used
+Core logic (existing modules):
+- `food.py`: `Food` entity (name, calories)
+- `database.py`: `FoodDatabase` for storing and searching foods
+- `tracker.py`: `DailyLog` for consumed food entries and total calorie calculation
+- `user.py`: `User` profile and daily calorie count
+- `main.py`: CLI entrypoint and menu-driven flow
 
-* Classes and Objects
-* Encapsulation
-* Modular Programming (multiple Python files)
+Web integration (added):
+- `api_server.py`: Flask API wrapper around existing logic
+- `streamlit_app.py`: Streamlit UI consuming Flask endpoints via HTTP
 
-## Project Files
+## Flask API Endpoints
 
-main.py – Runs the application and handles the menu system
-user.py – Defines the User class and manages user information
-food.py – Defines the Food class and stores food data
-database.py – Manages the food database and food searching
-tracker.py – Manages the daily food log and calculates total calories
+- `GET /health` - service health check
+- `GET /api/foods` - list foods in database
+- `POST /api/foods` - add a food (`name`, `calories`)
+- `POST /api/log` - add food to daily log (`food_name`)
+- `GET /api/log` - get daily log entries and totals
+- `DELETE /api/log` - reset current day log and calories
+- `GET /api/user` - fetch current user profile
+- `PUT /api/user` - update user profile fields
 
-## Example Foods in Database
+## Setup
 
-* Char Siu Rice
-* Milk Tea
-* Dim Sum
+1. Create and activate a Python virtual environment.
+2. Install dependencies:
 
-## Programming Language
+```bash
+pip install -r requirements.txt
+```
 
-Python
+## Run
 
-## Teammates
+Open two terminals in this folder.
 
-Mohamed Mohideen Dawood(13776731)
+Terminal 1 (Flask backend):
 
-Wu Chun Yin(13879841 )
+```bash
+./run_backend.sh
+```
 
-Pun Anjuli(13880208)
+Terminal 2 (Streamlit frontend):
+
+```bash
+./run_frontend.sh
+```
+
+Or run manually:
+
+```bash
+python3 api_server.py
+streamlit run streamlit_app.py
+```
+
+## Notes
+
+- Data is stored in memory, so restarting Flask resets foods/logs to initial state.
+- The frontend default backend URL is `http://127.0.0.1:5050` and can be changed from the sidebar.
+- Backend port can be overridden with `HK_TRACKER_API_PORT`.
+
+## Team
+
+- Mohamed Mohideen Dawood (13776731)
+- Wu Chun Yin (13879841)
+- Pun Anjuli (13880208)
