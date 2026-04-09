@@ -1,9 +1,3 @@
-"""Flask API server for the HK Calorie Tracker.
-
-This module wraps the existing OOP classes (User, FoodDatabase, DailyLog)
-behind JSON endpoints so a web UI can consume the same core logic.
-"""
-
 from __future__ import annotations
 
 import os
@@ -18,76 +12,184 @@ from user import User
 
 
 class CalorieTrackerService:
-    """Encapsulates shared tracker state and operations.
-
-    A lock is used to avoid race conditions when running Flask with threading.
-    """
-
     def __init__(self) -> None:
         self._lock = Lock()
-        self.user = User("Dawood", 20, 70, 175, "Maintain")
+        self.users = [User("Dawood", 20, 70, 175, "Maintain", daily_calorie_target=2000)]
+        self.current_user_index = 0
         self.db = FoodDatabase()
-        self.log = DailyLog()
+        self.logs = [DailyLog()]
+        self.weekly_history = [[0]]
         self._seed_foods()
 
+    def current_user(self) -> User:
+        return self.users[self.current_user_index]
+
+    def current_log(self) -> DailyLog:
+        return self.logs[self.current_user_index]
+
+    def _user_payload(self, user: User, index: int | None = None) -> Dict[str, int | str]:
+        if index is None:
+            index = self.current_user_index
+        return {
+            "name": user.name,
+            "age": user.age,
+            "weight": user.weight,
+            "height": user.height,
+            "goal": user.goal,
+            "daily_calories": user.get_daily_calories(),
+            "daily_calorie_target": user.get_daily_calorie_target(),
+            "weekly_history": self.weekly_history[index] if 0 <= index < len(self.weekly_history) else [],
+        }
+
+    def _food_payload(self, food) -> Dict[str, int | str]:
+        return {
+            "name": food.name,
+            "calories": food.calories,
+            "category": getattr(food, "category", "General"),
+        }
+
+    def user_exists(self, name: str) -> bool:
+        return any(user.name.lower() == name.lower() for user in self.users)
+
     def _seed_foods(self) -> None:
-        self.db.add_food("Char Siu Rice", 600)
-        self.db.add_food("Milk Tea", 250)
-        self.db.add_food("Dim Sum", 400)
+        self.db.add_food("Rice Noodle Roll (Cheung Fun) / 腸粉", 220, "Food")
+        self.db.add_food("Curry Fish Balls (6 pieces) / 咖哩魚蛋", 117, "Snack")
+        self.db.add_food("Egg Waffle (Gai Daan Jai) / 雞蛋仔", 420, "Snack")
+        self.db.add_food("Fish Siu Mai (6 pieces) / 魚肉燒賣", 312, "Snack")
+        self.db.add_food("Hong Kong Style Milk Tea / 絲襪奶茶", 150, "Drink")
+        self.db.add_food("Pineapple Bun (Bo Lo Bao) / 菠蘿包", 340, "Food")
+        self.db.add_food("Egg Tart (Dan Tat) / 蛋撻", 220, "Dessert")
+        self.db.add_food("Shrimp Dumpling (Har Gow - 1 piece) / 蝦餃", 50, "Food")
+        self.db.add_food("Pork Dumpling (Siu Mai - 1 piece) / 燒賣 (點心)", 62, "Food")
+        self.db.add_food("BBQ Pork Bun (Char Siu Bao) / 叉燒包", 155, "Food")
+        self.db.add_food("Roast Goose (per serving) / 燒鵝", 450, "Food")
+        self.db.add_food("BBQ Pork (Char Siu) / 叉燒", 380, "Food")
+        self.db.add_food("Wonton Noodle Soup / 雲吞麵", 550, "Food")
+        self.db.add_food("Beef Brisket Noodle Soup / 牛腩麵", 650, "Food")
+        self.db.add_food("Fried Two (Rice Roll with Dough Stick) / 炸兩", 450, "Food")
+        self.db.add_food("Steamed Spare Ribs (in Black Bean Sauce) / 豉汁蒸排骨", 260, "Food")
+        self.db.add_food("Steamed Beef Tripe / 柱侯金錢肚", 223, "Food")
+        self.db.add_food("Steamed Chicken Feet / 豉汁蒸鳳爪", 200, "Food")
+        self.db.add_food("Curry Squid / 咖喱蒸土魷", 192, "Food")
+        self.db.add_food("Fried Spring Roll (1 piece) / 炸春卷", 150, "Snack")
+        self.db.add_food("Claypot Rice / 煲仔飯", 900, "Food")
+        self.db.add_food("Fried Rice with Salted Fish / 鹹魚雞粒炒飯", 800, "Food")
+        self.db.add_food("Baked Pork Chop Rice / 焗豬扒飯", 900, "Food")
+        self.db.add_food("Macaroni in Soup with Ham / 火腿通粉", 350, "Food")
+        self.db.add_food("French Toast (Hong Kong Style) / 西多士", 450, "Food")
+        self.db.add_food("Satay Beef Instant Noodles / 沙爹牛肉麵", 580, "Food")
+        self.db.add_food("Lemon Tea (Iced) / 凍檸茶", 120, "Drink")
+        self.db.add_food("Yin Yang Coffee & Tea / 鴛鴦", 160, "Drink")
+        self.db.add_food("Sago Cream with Mango / 楊枝甘露", 300, "Dessert")
+        self.db.add_food("Tofu Fa (Sweet Tofu Pudding) / 豆腐花", 150, "Dessert")
+        self.db.add_food("Mango Pancake / 芒果班戟", 250, "Dessert")
+        self.db.add_food("Durian Dessert / 榴槤甜品", 350, "Dessert")
+        self.db.add_food("Stinky Tofu (2 pieces) / 臭豆腐", 225, "Snack")
+        self.db.add_food("Put Chai Ko (Red Bean Pudding) / 砵仔糕", 260, "Snack")
+        self.db.add_food("Three Treasures (Stuffed Veggies) / 煎釀三寶", 176, "Snack")
+        self.db.add_food("Takoyaki (Octopus Balls - 8 pcs) / 章魚小丸子", 630, "Snack")
+        self.db.add_food("Waffle (Gai Daan Jai Grid Cake) / 格仔餅", 504, "Snack")
+        self.db.add_food("Offal (Cow内脏) / 牛雜", 300, "Snack")
+        self.db.add_food("Fake Shark Fin Soup (Bowl) / 碗仔翅", 112, "Snack")
+        self.db.add_food("Fish & Lettuce Soup / 生菜魚肉", 120, "Snack")
+        self.db.add_food("Chive & Pig Blood Soup / 韭菜豬紅", 150, "Snack")
+        self.db.add_food("Chestnuts (Fried - 100g) / 炒栗子", 210, "Snack")
+        self.db.add_food("Sesame Balls (Jian Dui - 2 pieces) / 煎堆", 300, "Dessert")
+        self.db.add_food("Steamed Milk Pudding / 雙皮奶", 220, "Dessert")
+        self.db.add_food("Sugarcane Juice / 竹蔗水", 130, "Drink")
+        self.db.add_food("Red Bean Ice / 紅豆冰", 280, "Drink")
+        self.db.add_food("Salted Lemon 7-Up/Soda / 鹹檸七", 110, "Drink")
+        self.db.add_food("Fried Squid Tentacles (1 serving) / 炸魷魚鬚", 400, "Snack")
+        self.db.add_food("Steamed Glutinous Rice (Lo Mai Gai) / 糯米雞", 600, "Food")
+        self.db.add_food("Shrimp & Pork Shumai / 鮮蝦豬肉燒賣", 60, "Food")
+
+    def list_users(self) -> List[Dict[str, int | str]]:
+        return [self._user_payload(user, index=index) for index, user in enumerate(self.users)]
+
+    def add_user(self, name: str, age: int, weight: float, height: float, goal: str, daily_calorie_target: int = 2000) -> None:
+        with self._lock:
+            if self.user_exists(name):
+                raise ValueError("User already exists")
+            new_user = User(name, age, weight, height, goal, daily_calorie_target)
+            self.users.append(new_user)
+            self.logs.append(DailyLog())
+            self.weekly_history.append([0])
+            self.current_user_index = len(self.users) - 1
+
+    def select_user(self, name: str) -> None:
+        with self._lock:
+            for index, user in enumerate(self.users):
+                if user.name.lower() == name.lower():
+                    self.current_user_index = index
+                    return
+            raise ValueError("User not found")
+
+    def delete_user(self, name: str) -> None:
+        with self._lock:
+            if len(self.users) <= 1:
+                raise ValueError("Cannot delete the last user")
+            for index, user in enumerate(self.users):
+                if user.name.lower() == name.lower():
+                    if index == self.current_user_index:
+                        new_index = 0 if index != 0 else 1
+                        self.current_user_index = new_index
+                    del self.users[index]
+                    del self.logs[index]
+                    if self.current_user_index >= len(self.users):
+                        self.current_user_index = len(self.users) - 1
+                    return
+            raise ValueError("User not found")
 
     def list_foods(self) -> List[Dict[str, int | str]]:
-        return [
-            {"name": food.name, "calories": food.calories}
-            for food in self.db.food_list
-        ]
+        return [self._food_payload(food) for food in self.db.food_list]
 
-    def add_food(self, name: str, calories: int) -> None:
+    def add_food(self, name: str, calories: int, category: str = "General") -> None:
         with self._lock:
-            self.db.add_food(name, calories)
+            self.db.add_food(name, calories, category)
 
     def log_food(self, food_name: str) -> Dict[str, int | str]:
         with self._lock:
             food = self.db.get_food(food_name)
             if not food:
                 raise ValueError("Food not found in database")
-
-            self.log.add_entry(food)
-            self.user.add_calories(food.calories)
-            return {"name": food.name, "calories": food.calories}
+            self.current_log().add_entry(food)
+            self.current_user().add_calories(food.calories)
+            self.weekly_history[self.current_user_index][-1] = self.current_log().total_calories()
+            return self._food_payload(food)
 
     def get_log(self) -> Dict[str, object]:
-        entries = [
-            {"name": food.name, "calories": food.calories}
-            for food in self.log.log
-        ]
+        entries = [self._food_payload(food) for food in self.current_log().log]
         return {
             "entries": entries,
-            "total_calories": self.log.total_calories(),
+            "total_calories": self.current_log().total_calories(),
             "entry_count": len(entries),
         }
 
     def reset_day(self) -> None:
         with self._lock:
-            self.log.log.clear()
-            self.user.reset_daily_calories()
+            total = self.current_log().total_calories()
+            history = self.weekly_history[self.current_user_index]
+            if history:
+                history[-1] = total
+            history.append(0)
+            if len(history) > 7:
+                history.pop(0)
+            self.current_log().log.clear()
+            self.current_user().reset_daily_calories()
 
     def get_user(self) -> Dict[str, int | str]:
-        return {
-            "name": self.user.name,
-            "age": self.user.age,
-            "weight": self.user.weight,
-            "height": self.user.height,
-            "goal": self.user.goal,
-            "daily_calories": self.user.get_daily_calories(),
-        }
+        return self._user_payload(self.current_user())
 
     def update_user(self, payload: Dict[str, object]) -> Dict[str, int | str]:
         with self._lock:
-            self.user.name = str(payload.get("name", self.user.name)).strip() or self.user.name
-            self.user.age = int(payload.get("age", self.user.age))
-            self.user.weight = float(payload.get("weight", self.user.weight))
-            self.user.height = float(payload.get("height", self.user.height))
-            self.user.goal = str(payload.get("goal", self.user.goal)).strip() or self.user.goal
+            user = self.current_user()
+            user.name = str(payload.get("name", user.name)).strip() or user.name
+            user.age = int(payload.get("age", user.age))
+            user.weight = float(payload.get("weight", user.weight))
+            user.height = float(payload.get("height", user.height))
+            user.goal = str(payload.get("goal", user.goal)).strip() or user.goal
+            daily_target = payload.get("daily_calorie_target", user.get_daily_calorie_target())
+            user.set_daily_calorie_target(int(daily_target))
             return self.get_user()
 
 
@@ -110,6 +212,7 @@ def create_food() -> tuple:
     payload = request.get_json(silent=True) or {}
     name = str(payload.get("name", "")).strip()
     calories = payload.get("calories")
+    category = str(payload.get("category", "General")).strip() or "General"
 
     if not name:
         return jsonify({"error": "Field 'name' is required"}), 400
@@ -121,8 +224,8 @@ def create_food() -> tuple:
     except (TypeError, ValueError):
         return jsonify({"error": "Field 'calories' must be a positive integer"}), 400
 
-    service.add_food(name, calories_int)
-    return jsonify({"message": "Food added", "food": {"name": name, "calories": calories_int}}), 201
+    service.add_food(name, calories_int, category)
+    return jsonify({"message": "Food added", "food": {"name": name, "calories": calories_int, "category": category}}), 201
 
 
 @app.post("/api/log")
@@ -138,7 +241,7 @@ def add_log_entry() -> tuple:
     except ValueError as err:
         return jsonify({"error": str(err)}), 404
 
-    return jsonify({"message": "Food logged", "entry": entry, "daily_calories": service.user.get_daily_calories()}), 201
+    return jsonify({"message": "Food logged", "entry": entry, "daily_calories": service.get_user()["daily_calories"]}), 201
 
 
 @app.get("/api/log")
@@ -150,6 +253,73 @@ def get_log() -> tuple:
 def reset_log() -> tuple:
     service.reset_day()
     return jsonify({"message": "Daily log reset"}), 200
+
+
+@app.get("/api/users")
+def get_users() -> tuple:
+    return jsonify({"users": service.list_users()}), 200
+
+
+@app.post("/api/users")
+def create_user() -> tuple:
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name", "")).strip()
+    age = payload.get("age")
+    weight = payload.get("weight")
+    height = payload.get("height")
+    goal = str(payload.get("goal", "Maintain")).strip() or "Maintain"
+    daily_target = payload.get("daily_calorie_target", 2000)
+
+    if not name:
+        return jsonify({"error": "Field 'name' is required"}), 400
+
+    try:
+        age_int = int(age)
+        weight_float = float(weight)
+        height_float = float(height)
+        daily_target_int = int(daily_target)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Age, weight, height, and daily_calorie_target must be numbers"}), 400
+
+    try:
+        service.add_user(name, age_int, weight_float, height_float, goal, daily_target_int)
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 409
+
+    return jsonify({"message": "User created", "user": service.get_user()}), 201
+
+
+@app.post("/api/users/select")
+def select_user() -> tuple:
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name", "")).strip()
+
+    if not name:
+        return jsonify({"error": "Field 'name' is required"}), 400
+
+    try:
+        service.select_user(name)
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 404
+
+    return jsonify({"message": "User selected", "user": service.get_user()}), 200
+
+
+@app.delete("/api/users")
+def delete_user_endpoint() -> tuple:
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name", "")).strip()
+
+    if not name:
+        return jsonify({"error": "Field 'name' is required"}), 400
+
+    try:
+        service.delete_user(name)
+    except ValueError as err:
+        status = 400 if "last user" in str(err) else 404
+        return jsonify({"error": str(err)}), status
+
+    return jsonify({"message": "User deleted"}), 200
 
 
 @app.get("/api/user")

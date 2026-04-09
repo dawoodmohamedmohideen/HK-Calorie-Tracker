@@ -1,13 +1,16 @@
-# This file defines the Food class.
-# Each Food object represents one type of food and its calorie value.
-
 class Food:
-
-    # Constructor: initializes food name and calorie value
     def __init__(self, name, calories):
-        self.name = name            # Name of the food
-        self.calories = calories    # Calories for the food
+        self.name = name
+        self.calories = calories
 
-    # Method to display food information
     def get_info(self):
         return f"{self.name} - {self.calories} kcal"
+
+
+class HKFood(Food):
+    def __init__(self, name, calories, category):
+        super().__init__(name, calories)
+        self.category = category
+
+    def get_info(self):
+        return f"{self.name} ({self.category}) - {self.calories} kcal"
