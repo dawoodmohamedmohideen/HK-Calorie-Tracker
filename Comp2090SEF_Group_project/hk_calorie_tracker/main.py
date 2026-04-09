@@ -14,20 +14,14 @@ def main():
 
     while True:
         print("\n=== HK Calorie Tracker ===")
-        print("1. Show Food List")
-        print("2. Add Food")
-        print("3. Show Log")
-        print("4. Total Calories")
-        print("5. BMI")
-        print("6. Save & Exit")
-
+        print("1. Show Food List\n2. Add Food\n3. Show Log")
+        print("4. Total Calories\n5. BMI\n6. Save & Exit")
         choice = input("Choose: ")
 
         if choice == "1":
             db.show_foods()
         elif choice == "2":
-            name = input("Enter food: ")
-            food = db.get_food(name)
+            food = db.get_food(input("Enter food: "))
             if food:
                 log.add_entry(food)
                 user.add_calories(food.calories)
@@ -38,13 +32,9 @@ def main():
             log.show_log()
         elif choice == "4":
             total = log.total_calories()
-            goal = user.calorie_goal()
-            print("Total:", total)
-            print("Goal:", goal)
-            if total > goal:
-                print("You exceeded your goal!")
-            else:
-                print("Within goal")
+            goal = user.get_daily_calorie_target()
+            print(f"Total: {total}\nGoal: {goal}")
+            print("You exceeded your goal!" if total > goal else "Within goal")
         elif choice == "5":
             print("BMI:", round(user.calculate_bmi(), 2))
         elif choice == "6":
