@@ -20,6 +20,8 @@ class User:
         self.__daily_calories = 0
 
     def calculate_bmi(self):
+        if self.height <= 0:
+            return 0.0
         return self.weight / (self.height / 100) ** 2
 
     def get_daily_calorie_target(self):

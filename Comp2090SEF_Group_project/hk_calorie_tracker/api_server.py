@@ -19,6 +19,15 @@ class CalorieTrackerService:
         self.db = FoodDatabase()
         self.logs = [DailyLog()]
         self.weekly_history = [[0]]
+        # Water tracking: glasses per user per day
+        self.water_intake: List[int] = [0]
+        self.water_goal: List[int] = [8]  # default 8 glasses
+        # Meal categories for log entries
+        self.meal_labels: List[List[str]] = [[]]  # parallel to log entries
+        # Streak tracking: consecutive days logged
+        self.streaks: List[int] = [0]
+        # Exercise tracking: list of {name, calories_burned, duration_min} per user
+        self.exercises: List[List[Dict]] = [[]]
         self._seed_foods()
 
     def current_user(self) -> User:
@@ -39,6 +48,11 @@ class CalorieTrackerService:
             "daily_calories": user.get_daily_calories(),
             "daily_calorie_target": user.get_daily_calorie_target(),
             "weekly_history": self.weekly_history[index] if 0 <= index < len(self.weekly_history) else [],
+            "water_intake": self.water_intake[index] if 0 <= index < len(self.water_intake) else 0,
+            "water_goal": self.water_goal[index] if 0 <= index < len(self.water_goal) else 8,
+            "streak": self.streaks[index] if 0 <= index < len(self.streaks) else 0,
+            "exercises": self.exercises[index] if 0 <= index < len(self.exercises) else [],
+            "exercise_burned": sum(e.get("calories_burned", 0) for e in (self.exercises[index] if 0 <= index < len(self.exercises) else [])),
         }
 
     def _food_payload(self, food) -> Dict[str, int | str]:
@@ -114,6 +128,11 @@ class CalorieTrackerService:
             self.users.append(new_user)
             self.logs.append(DailyLog())
             self.weekly_history.append([0])
+            self.water_intake.append(0)
+            self.water_goal.append(8)
+            self.meal_labels.append([])
+            self.streaks.append(0)
+            self.exercises.append([])
             self.current_user_index = len(self.users) - 1
 
     def select_user(self, name: str) -> None:
@@ -131,10 +150,18 @@ class CalorieTrackerService:
             for index, user in enumerate(self.users):
                 if user.name.lower() == name.lower():
                     if index == self.current_user_index:
-                        new_index = 0 if index != 0 else 1
-                        self.current_user_index = new_index
+                        self.current_user_index = 0 if index != 0 else 1
                     del self.users[index]
                     del self.logs[index]
+                    del self.weekly_history[index]
+                    del self.water_intake[index]
+                    del self.water_goal[index]
+                    del self.meal_labels[index]
+                    del self.streaks[index]
+                    del self.exercises[index]
+                    # Adjust current index after deletion
+                    if self.current_user_index > index:
+                        self.current_user_index -= 1
                     if self.current_user_index >= len(self.users):
                         self.current_user_index = len(self.users) - 1
                     return
@@ -147,23 +174,56 @@ class CalorieTrackerService:
         with self._lock:
             self.db.add_food(name, calories, category)
 
-    def log_food(self, food_name: str) -> Dict[str, int | str]:
+    def log_food(self, food_name: str, quantity: int = 1, meal: str = "General") -> Dict[str, int | str]:
         with self._lock:
             food = self.db.get_food(food_name)
             if not food:
                 raise ValueError("Food not found in database")
-            self.current_log().add_entry(food)
-            self.current_user().add_calories(food.calories)
+            for _ in range(quantity):
+                self.current_log().add_entry(food)
+                self.current_user().add_calories(food.calories)
+                self.meal_labels[self.current_user_index].append(meal)
             self.weekly_history[self.current_user_index][-1] = self.current_log().total_calories()
+            # Update streak: if first log of the day, increment streak
+            if len(self.current_log().log) == quantity:
+                self.streaks[self.current_user_index] += 1
             return self._food_payload(food)
 
     def get_log(self) -> Dict[str, object]:
-        entries = [self._food_payload(food) for food in self.current_log().log]
+        # Group entries by food name + meal for cleaner display
+        from collections import Counter, defaultdict
+        meal_labels = self.meal_labels[self.current_user_index]
+        counts: Counter = Counter()
+        cals: Dict[str, int] = {}
+        meals: Dict[str, str] = {}
+        for i, food in enumerate(self.current_log().log):
+            meal = meal_labels[i] if i < len(meal_labels) else "General"
+            counts[food.name] += 1
+            cals[food.name] = food.calories
+            meals[food.name] = meal
+        entries = [
+            {"food_name": name, "quantity": qty, "total_calories": qty * cals[name], "meal": meals[name]}
+            for name, qty in counts.items()
+        ]
+        # Compute per-meal breakdown
+        meal_totals: Dict[str, int] = defaultdict(int)
+        for entry in entries:
+            meal_totals[entry["meal"]] += entry["total_calories"]
         return {
             "entries": entries,
             "total_calories": self.current_log().total_calories(),
-            "entry_count": len(entries),
+            "entry_count": len(self.current_log().log),
+            "meal_totals": dict(meal_totals),
         }
+
+    def add_water(self, glasses: int = 1) -> int:
+        with self._lock:
+            self.water_intake[self.current_user_index] += glasses
+            return self.water_intake[self.current_user_index]
+
+    def set_water_goal(self, goal: int) -> None:
+        with self._lock:
+            self.water_goal[self.current_user_index] = max(1, goal)
 
     def reset_day(self) -> None:
         with self._lock:
@@ -176,6 +236,9 @@ class CalorieTrackerService:
                 history.pop(0)
             self.current_log().log.clear()
             self.current_user().reset_daily_calories()
+            self.water_intake[self.current_user_index] = 0
+            self.meal_labels[self.current_user_index] = []
+            self.exercises[self.current_user_index] = []
 
     def get_user(self) -> Dict[str, int | str]:
         return self._user_payload(self.current_user())
@@ -236,8 +299,16 @@ def add_log_entry() -> tuple:
     if not food_name:
         return jsonify({"error": "Field 'food_name' is required"}), 400
 
+    quantity = payload.get("quantity", 1)
     try:
-        entry = service.log_food(food_name)
+        quantity = max(1, int(quantity))
+    except (TypeError, ValueError):
+        quantity = 1
+
+    meal = str(payload.get("meal", "General")).strip() or "General"
+
+    try:
+        entry = service.log_food(food_name, quantity, meal)
     except ValueError as err:
         return jsonify({"error": str(err)}), 404
 
@@ -337,6 +408,55 @@ def update_user() -> tuple:
         return jsonify({"error": "Invalid user payload"}), 400
 
     return jsonify({"message": "User updated", "user": user}), 200
+
+
+@app.post("/api/water")
+def add_water() -> tuple:
+    payload = request.get_json(silent=True) or {}
+    glasses = payload.get("glasses", 1)
+    try:
+        glasses = max(1, int(glasses))
+    except (TypeError, ValueError):
+        glasses = 1
+    total = service.add_water(glasses)
+    return jsonify({"message": f"Added {glasses} glass(es)", "water_intake": total}), 200
+
+
+@app.put("/api/water/goal")
+def set_water_goal() -> tuple:
+    payload = request.get_json(silent=True) or {}
+    goal = payload.get("goal", 8)
+    try:
+        goal = max(1, int(goal))
+    except (TypeError, ValueError):
+        goal = 8
+    service.set_water_goal(goal)
+    return jsonify({"message": "Water goal updated", "water_goal": goal}), 200
+
+
+@app.post("/api/exercise")
+def add_exercise() -> tuple:
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name", "")).strip()
+    if not name:
+        return jsonify({"error": "Field 'name' is required"}), 400
+    try:
+        calories_burned = max(0, int(payload.get("calories_burned", 0)))
+        duration = max(1, int(payload.get("duration_min", 30)))
+    except (TypeError, ValueError):
+        return jsonify({"error": "calories_burned and duration_min must be integers"}), 400
+    with service._lock:
+        service.exercises[service.current_user_index].append(
+            {"name": name, "calories_burned": calories_burned, "duration_min": duration}
+        )
+    return jsonify({"message": "Exercise logged", "exercises": service.exercises[service.current_user_index]}), 201
+
+
+@app.get("/api/exercise")
+def get_exercises() -> tuple:
+    exercises = service.exercises[service.current_user_index]
+    total_burned = sum(e.get("calories_burned", 0) for e in exercises)
+    return jsonify({"exercises": exercises, "total_burned": total_burned}), 200
 
 
 if __name__ == "__main__":

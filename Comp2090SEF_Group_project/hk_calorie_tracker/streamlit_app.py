@@ -1,10 +1,12 @@
-"""Streamlit frontend for HK Calorie Tracker.
+﻿"""Streamlit frontend for HK Calorie Tracker.
 
 This UI talks to the Flask API and does not access tracker internals directly.
 """
 
 from __future__ import annotations
 
+import datetime
+import math
 import os
 import requests
 import streamlit as st
@@ -12,133 +14,269 @@ import streamlit as st
 
 DEFAULT_API_URL = "http://127.0.0.1:5050"
 
+TIPS = [
+    ("\U0001f966", "Eat at least 5 servings of fruits & veggies daily for optimal health."),
+    ("\U0001f3c3", "30 minutes of moderate exercise burns ~200-300 calories."),
+    ("\U0001f4a7", "Drinking water before meals can reduce calorie intake by 13%."),
+    ("\U0001f634", "Poor sleep increases hunger hormones \u2014 aim for 7-9 hours."),
+    ("\U0001f373", "High-protein breakfasts keep you fuller for longer."),
+    ("\u23f0", "Eating dinner 2-3 hours before bed improves digestion."),
+    ("\U0001f9d8", "Stress raises cortisol, which promotes fat storage. Try meditation."),
+    ("\U0001f957", "Fill half your plate with vegetables at every meal."),
+    ("\U0001f6b6", "Walking 10,000 steps = ~400-500 calories burned per day."),
+    ("\U0001f375", "Green tea can boost metabolism by 3-4% through thermogenesis."),
+]
+
+EXERCISE_PRESETS = {
+    "\U0001f3c3 Running (30 min)": 300,
+    "\U0001f6b6 Walking (30 min)": 150,
+    "\U0001f3ca Swimming (30 min)": 250,
+    "\U0001f6b4 Cycling (30 min)": 280,
+    "\U0001f9d8 Yoga (30 min)": 120,
+    "\U0001f4aa Weight Training (30 min)": 200,
+    "\U0001f938 HIIT (20 min)": 250,
+    "\U0001f3c0 Basketball (30 min)": 260,
+    "\u26bd Football (30 min)": 270,
+    "\U0001f3be Tennis (30 min)": 230,
+}
+
 
 def inject_styles() -> None:
     st.markdown(
         """
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:wght@500;700&display=swap');
 
             :root {
-                --bg: #0f0f0f;
-                --panel: #1a1a1a;
-                --ink: #ffffff;
+                --bg: #0a0a0f;
+                --panel: rgba(255,255,255,0.04);
+                --panel-solid: #141419;
+                --ink: #f0f0f5;
+                --ink-secondary: #a0a0b0;
                 --accent: #ff6b35;
+                --accent-glow: rgba(255,107,53,0.25);
                 --accent-2: #00d4aa;
-                --muted: #888888;
-                --border: #333333;
-                --shadow: rgba(0,0,0,0.3);
+                --accent-2-glow: rgba(0,212,170,0.2);
+                --accent-3: #6c5ce7;
+                --accent-3-glow: rgba(108,92,231,0.2);
+                --blue: #3b82f6;
+                --blue-glow: rgba(59,130,246,0.2);
+                --muted: #6b6b80;
+                --border: rgba(255,255,255,0.08);
+                --border-hover: rgba(255,255,255,0.15);
+                --radius: 16px;
+                --radius-sm: 10px;
+                --radius-lg: 24px;
             }
 
             .stApp {
                 background:
-                    radial-gradient(circle at 10% 20%, rgba(255,107,53,0.15), transparent 28%),
-                    radial-gradient(circle at 92% 8%, rgba(0,212,170,0.1), transparent 24%),
-                    linear-gradient(145deg, #0f0f0f 0%, #1a1a1a 55%, #141414 100%);
+                    radial-gradient(ellipse at 15% 10%, rgba(255,107,53,0.08), transparent 40%),
+                    radial-gradient(ellipse at 85% 5%, rgba(0,212,170,0.06), transparent 35%),
+                    radial-gradient(ellipse at 50% 90%, rgba(108,92,231,0.05), transparent 40%),
+                    linear-gradient(160deg, #0a0a0f 0%, #101018 50%, #0d0d14 100%);
                 color: var(--ink);
-                font-family: 'Space Grotesk', sans-serif;
+                font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+                -webkit-font-smoothing: antialiased;
             }
 
-            h1, h2, h3 {
-                font-family: 'Fraunces', serif;
-                letter-spacing: 0.2px;
-                color: var(--ink);
-            }
+            h1, h2, h3 { font-family: 'Playfair Display', Georgia, serif; color: var(--ink); letter-spacing: -0.01em; }
+            h1 { font-weight: 700; } h2 { font-weight: 600; font-size: 1.5rem; } h3 { font-weight: 500; }
+            p, span, label, div { letter-spacing: 0.01em; }
 
             .hero {
-                background: linear-gradient(120deg, rgba(26,26,26,0.95), rgba(20,20,20,0.95));
-                border: 1px solid var(--border);
-                border-radius: 22px;
-                padding: 1.2rem 1.4rem;
-                box-shadow: 0 12px 30px var(--shadow);
-                margin-bottom: 0.8rem;
-                animation: floatIn 0.6s ease-out;
+                background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%);
+                backdrop-filter: blur(20px); border: 1px solid var(--border);
+                border-radius: var(--radius-lg); padding: 1.8rem 2rem;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);
+                margin-bottom: 1.2rem; position: relative; overflow: hidden;
+            }
+            .hero::before {
+                content: ''; position: absolute; top: 0; right: 0;
+                width: 200px; height: 200px;
+                background: radial-gradient(circle, var(--accent-glow), transparent 70%);
+                opacity: 0.4; border-radius: 50%; transform: translate(30%, -30%);
             }
 
             .stat-card {
-                background: var(--panel);
-                border: 1px solid var(--border);
-                border-radius: 16px;
-                padding: 0.8rem 1rem;
-                box-shadow: 0 8px 20px var(--shadow);
-                margin-bottom: 0.6rem;
-                animation: rise 0.5s ease-out;
+                background: linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+                backdrop-filter: blur(12px); border: 1px solid var(--border);
+                border-radius: var(--radius); padding: 1.1rem 1.3rem;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+                transition: all 0.3s cubic-bezier(0.4,0,0.2,1); overflow: hidden;
+            }
+            .stat-card:hover { border-color: var(--border-hover); transform: translateY(-2px); box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
+            .stat-card .stat-icon { font-size: 1.5rem; margin-bottom: 0.5rem; display: inline-block; }
+            .stat-card .stat-label { color: var(--muted); font-size: 0.72rem; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 0.2rem; }
+            .stat-card .stat-value { font-family: 'Inter', sans-serif; font-size: 1.5rem; font-weight: 800; color: var(--ink); letter-spacing: -0.02em; }
+
+            .progress-container {
+                background: linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+                backdrop-filter: blur(12px); border: 1px solid var(--border);
+                border-radius: var(--radius); padding: 1.2rem;
+            }
+            .progress-bar-track { width: 100%; height: 10px; background: rgba(255,255,255,0.06); border-radius: 5px; overflow: hidden; margin: 0.6rem 0; }
+            .progress-bar-fill { height: 100%; border-radius: 5px; transition: width 0.6s cubic-bezier(0.4,0,0.2,1); }
+
+            .theme-divider { height: 1px; background: linear-gradient(90deg, transparent, var(--border), transparent); margin: 1.5rem 0; }
+
+            [data-testid="stSidebar"] { background: linear-gradient(180deg, #111118 0%, #0d0d14 100%); border-right: 1px solid var(--border); }
+            [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+            [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h2,
+            [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3,
+            [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h4,
+            [data-testid="stSidebar"] label, [data-testid="stSidebar"] .stMarkdown,
+            [data-testid="stSidebar"] span, [data-testid="stSidebar"] div { color: #e0e0e8 !important; }
+            [data-testid="stSidebar"] button { color: #ffffff !important; }
+            [data-testid="stSidebar"] [data-testid="stSelectbox"] span,
+            [data-testid="stSidebar"] [data-testid="stSelectbox"] input,
+            [data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] span { color: #ffffff !important; }
+            [data-testid="stSidebar"] [data-testid="stTextInput"] input { color: #ffffff !important; }
+
+            .sidebar-badge {
+                background: linear-gradient(135deg, rgba(255,107,53,0.12), rgba(0,212,170,0.08));
+                border: 1px solid rgba(255,107,53,0.2); border-radius: var(--radius-sm);
+                padding: 0.8rem 1rem; margin-bottom: 1rem;
+            }
+            .sidebar-badge .badge-name { font-family: 'Playfair Display', serif; font-size: 1.2rem; font-weight: 700; color: var(--ink); }
+            .sidebar-badge .badge-sub { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; margin-top: 0.15rem; }
+
+            .entry-row {
+                display: flex; align-items: center; justify-content: space-between;
+                background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+                border-radius: var(--radius-sm); padding: 0.6rem 1rem;
+                margin-bottom: 0.4rem; transition: background 0.2s;
+            }
+            .entry-row:hover { background: rgba(255,255,255,0.06); }
+            .entry-name { color: var(--ink); font-weight: 500; flex: 2; }
+            .entry-qty { color: var(--accent); font-weight: 600; flex: 0.5; text-align: center; }
+            .entry-cal { color: var(--accent-2); font-weight: 700; flex: 1; text-align: right; }
+
+            .login-logo {
+                width: 52px; height: 52px;
+                background: linear-gradient(135deg, var(--accent), var(--accent-2));
+                border-radius: 14px; display: inline-flex; align-items: center; justify-content: center;
+                font-size: 1.6rem; margin: 0 auto 0.5rem;
+                box-shadow: 0 8px 28px var(--accent-glow);
+            }
+            .login-title { font-family: 'Playfair Display', serif; font-size: 1.6rem; font-weight: 700; color: var(--ink); margin: 0 0 0.1rem; text-align: center; }
+            .login-subtitle { color: var(--muted); font-size: 0.78rem; text-align: center; margin: 0 0 0.6rem; }
+            .login-features { display: flex; justify-content: center; gap: 1rem; margin-top: 0.6rem; flex-wrap: wrap; }
+            .login-feature { display: flex; align-items: center; gap: 0.4rem; color: var(--ink-secondary); font-size: 0.75rem; }
+            .login-feature-icon {
+                width: 26px; height: 26px; background: rgba(255,255,255,0.05);
+                border: 1px solid var(--border); border-radius: 7px;
+                display: flex; align-items: center; justify-content: center; font-size: 0.8rem;
             }
 
-            .stat-label {
-                color: var(--muted);
-                font-size: 0.86rem;
-                letter-spacing: 0.2px;
+            .calorie-ring-wrap {
+                display: flex; align-items: center; gap: 2rem;
+                background: linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+                backdrop-filter: blur(12px); border: 1px solid var(--border);
+                border-radius: var(--radius-lg); padding: 1.5rem 1.8rem; margin-bottom: 1rem;
+            }
+            .calorie-ring { position: relative; width: 140px; height: 140px; flex-shrink: 0; }
+            .calorie-ring svg { transform: rotate(-90deg); }
+            .calorie-ring-label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+            .calorie-ring-label .ring-value { font-size: 1.5rem; font-weight: 800; color: var(--ink); line-height: 1; }
+            .calorie-ring-label .ring-unit { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 0.2rem; }
+            .calorie-ring-details { flex: 1; }
+            .calorie-ring-details .ring-row { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0; border-bottom: 1px solid var(--border); }
+            .calorie-ring-details .ring-row:last-child { border-bottom: none; }
+            .ring-row-label { display: flex; align-items: center; gap: 0.5rem; color: var(--ink-secondary); font-size: 0.82rem; }
+            .ring-row-label .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+            .ring-row-value { font-weight: 700; color: var(--ink); font-size: 0.92rem; }
+
+            .water-visual { display: flex; gap: 0.35rem; flex-wrap: wrap; margin: 0.6rem 0; }
+            .water-glass { font-size: 1.4rem; opacity: 0.25; transition: all 0.3s; }
+            .water-glass.filled { opacity: 1; filter: drop-shadow(0 0 4px rgba(59,130,246,0.4)); }
+
+            .section-head { display: flex; align-items: center; gap: 0.6rem; margin: 0.3rem 0 0.8rem; }
+            .section-head .sh-icon { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1rem; }
+            .section-head .sh-text { font-family: 'Playfair Display', serif; font-size: 1.2rem; font-weight: 600; color: var(--ink); }
+
+            .motivation-banner {
+                background: linear-gradient(135deg, rgba(108,92,231,0.1), rgba(0,212,170,0.06));
+                border: 1px solid rgba(108,92,231,0.18); border-radius: var(--radius);
+                padding: 0.9rem 1.2rem; display: flex; align-items: center; gap: 0.8rem; margin-bottom: 1rem;
+            }
+            .motivation-banner .mb-icon { font-size: 1.6rem; flex-shrink: 0; }
+            .motivation-banner .mb-text { color: var(--ink-secondary); font-size: 0.82rem; line-height: 1.5; }
+            .motivation-banner .mb-label { font-size: 0.65rem; color: var(--accent-3); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600; margin-bottom: 0.15rem; }
+
+            .macro-wrap { display: flex; gap: 0.8rem; margin: 0.5rem 0 1rem; }
+            .macro-item { flex: 1; background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.7rem; text-align: center; }
+            .macro-item .mi-label { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+            .macro-item .mi-value { font-size: 1.1rem; font-weight: 700; color: var(--ink); margin: 0.2rem 0; }
+            .macro-item .mi-bar { height: 4px; border-radius: 2px; background: rgba(255,255,255,0.06); overflow: hidden; }
+            .macro-item .mi-fill { height: 100%; border-radius: 2px; }
+
+            .exercise-entry {
+                display: flex; align-items: center; justify-content: space-between;
+                background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+                border-radius: var(--radius-sm); padding: 0.55rem 1rem; margin-bottom: 0.35rem;
+            }
+            .exercise-entry .ex-name { color: var(--ink); font-weight: 500; flex: 2; }
+            .exercise-entry .ex-dur { color: var(--accent-3); font-weight: 600; flex: 0.7; text-align: center; font-size: 0.85rem; }
+            .exercise-entry .ex-cal { color: #e74c3c; font-weight: 700; flex: 1; text-align: right; }
+
+            .insight-card {
+                background: linear-gradient(145deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+                border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.2rem;
+            }
+            .insight-card .ic-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.3rem; }
+            .insight-card .ic-value { font-size: 1.3rem; font-weight: 800; color: var(--ink); }
+            .insight-card .ic-sub { font-size: 0.75rem; color: var(--ink-secondary); margin-top: 0.2rem; }
+
+            .stButton > button {
+                background: linear-gradient(135deg, var(--accent) 0%, #e85d2c 100%) !important;
+                color: #fff !important; border: none !important; border-radius: var(--radius-sm) !important;
+                font-weight: 600 !important; font-size: 0.88rem !important;
+                padding: 0.5rem 1.2rem !important;
+                transition: all 0.25s cubic-bezier(0.4,0,0.2,1) !important;
+                box-shadow: 0 4px 15px var(--accent-glow) !important;
+            }
+            .stButton > button:hover { transform: translateY(-1px) !important; box-shadow: 0 8px 25px var(--accent-glow) !important; filter: brightness(1.1) !important; }
+            .stButton > button:active { transform: translateY(0) !important; }
+            .stFormSubmitButton > button { background: linear-gradient(135deg, var(--accent-2) 0%, #00b894 100%) !important; box-shadow: 0 4px 15px var(--accent-2-glow) !important; }
+            .stFormSubmitButton > button:hover { box-shadow: 0 8px 25px var(--accent-2-glow) !important; }
+
+            [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input {
+                background: rgba(255,255,255,0.04) !important; border: 1px solid var(--border) !important;
+                border-radius: var(--radius-sm) !important; color: var(--ink) !important;
+            }
+            [data-testid="stTextInput"] input:focus, [data-testid="stNumberInput"] input:focus {
+                border-color: var(--accent) !important; box-shadow: 0 0 0 2px var(--accent-glow) !important;
             }
 
-            .stat-value {
-                font-size: 1.35rem;
-                font-weight: 700;
-                color: var(--accent-2);
+            [data-testid="stSelectbox"] > div > div {
+                background: rgba(255,255,255,0.04) !important; border: 1px solid var(--border) !important;
+                border-radius: var(--radius-sm) !important; cursor: pointer !important; color: #ffffff !important;
             }
+            [data-testid="stSelectbox"] input { caret-color: transparent !important; cursor: pointer !important; color: #ffffff !important; }
+            [data-testid="stSelectbox"] span, [data-testid="stSelectbox"] div[data-baseweb="select"] span { color: #ffffff !important; }
+            [data-baseweb="menu"] li, [data-baseweb="menu"] [role="option"] { color: #ffffff !important; }
 
-            [data-testid="stSidebar"] {
-                background: linear-gradient(180deg, #1a1a1a 0%, #141414 100%);
-                border-right: 1px solid var(--border);
-            }
+            .stTabs [data-baseweb="tab-list"] { gap: 0.4rem; }
+            .stTabs [data-baseweb="tab"] { background: transparent; border-radius: var(--radius-sm); padding: 0.45rem 1rem; color: var(--muted); font-weight: 500; }
+            .stTabs [aria-selected="true"] { background: rgba(255,107,53,0.12) !important; color: var(--accent) !important; }
 
-            /* Dark theme for Streamlit components */
-            .stTextInput, .stNumberInput, .stSelectbox, .stTextArea, .stSlider {
-                background-color: var(--panel) !important;
-                color: var(--ink) !important;
-                border: 1px solid var(--border) !important;
-            }
+            .streamlit-expanderHeader { background: rgba(255,255,255,0.03) !important; border-radius: var(--radius-sm) !important; border: 1px solid var(--border) !important; }
+            [data-testid="stMetric"] { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.8rem; }
+            [data-testid="stMetricValue"] { color: var(--accent-2) !important; font-weight: 800 !important; }
+            [data-testid="stDataFrame"] { border: 1px solid var(--border) !important; border-radius: var(--radius-sm) !important; overflow: hidden !important; }
 
-            .stTextInput input, .stNumberInput input, .stSelectbox select, .stTextArea textarea {
-                background-color: var(--panel) !important;
-                color: var(--ink) !important;
-                border: none !important;
-            }
+            @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+            .hero, .stat-card, .progress-container, .entry-row, .motivation-banner { animation: fadeUp 0.5s cubic-bezier(0.4,0,0.2,1) both; }
+            .stat-card:nth-child(2) { animation-delay: 0.05s; }
+            .stat-card:nth-child(3) { animation-delay: 0.1s; }
+            .stat-card:nth-child(4) { animation-delay: 0.15s; }
 
-            .stButton button {
-                background: linear-gradient(135deg, var(--accent), var(--accent-2)) !important;
-                color: white !important;
-                border: none !important;
-                transition: all 0.3s ease !important;
-            }
-
-            .stButton button:hover {
-                transform: translateY(-2px) !important;
-                box-shadow: 0 8px 20px rgba(255,107,53,0.3) !important;
-            }
-
-            .stSuccess, .stInfo, .stWarning, .stError {
-                background-color: var(--panel) !important;
-                color: var(--ink) !important;
-                border: 1px solid var(--border) !important;
-            }
-
-            .stDataFrame {
-                background-color: var(--panel) !important;
-                color: var(--ink) !important;
-                border: 1px solid var(--border) !important;
-            }
-
-            .stDataFrame th, .stDataFrame td {
-                background-color: var(--panel) !important;
-                color: var(--ink) !important;
-                border-color: var(--border) !important;
-            }
-
-            @keyframes floatIn {
-                from { opacity: 0; transform: translateY(8px); }
-                to { opacity: 1; transform: translateY(0); }
-            }
-
-            @keyframes rise {
-                from { opacity: 0; transform: translateY(6px); }
-                to { opacity: 1; transform: translateY(0); }
-            }
-
-            @media (max-width: 900px) {
-                .hero {
-                    padding: 1rem;
-                }
+            @media (max-width: 768px) {
+                .hero { padding: 1.2rem; border-radius: var(--radius); }
+                .stat-card { padding: 0.8rem; }
+                .calorie-ring-wrap { flex-direction: column; text-align: center; }
+                .macro-wrap { flex-direction: column; }
             }
         </style>
         """,
@@ -154,17 +292,95 @@ def api_call(method: str, path: str, base_url: str, payload: dict | None = None)
 
 
 def render_stat_card(label: str, value: str, icon: str = "") -> None:
-    icon_html = f'<div style="font-size: 1.5rem; margin-bottom: 0.5rem;">{icon}</div>' if icon else ""
-    st.markdown(
-        f"""
-        <div class="stat-card">
-            {icon_html}
-            <div class="stat-label">{label}</div>
-            <div class="stat-value">{value}</div>
+    icon_html = f'<div class="stat-icon">{icon}</div>' if icon else ""
+    st.markdown(f'<div class="stat-card">{icon_html}<div class="stat-label">{label}</div><div class="stat-value">{value}</div></div>', unsafe_allow_html=True)
+
+
+def render_progress_bar(current: int, goal: int) -> None:
+    pct = min(100, int((current / goal) * 100)) if goal > 0 else 0
+    remaining = max(0, goal - current)
+    if pct >= 100:
+        color, status = "#e74c3c", "Over goal"
+    elif pct >= 75:
+        color, status = "#f39c12", "Almost there"
+    else:
+        color, status = "#00d4aa", f"{remaining} kcal left"
+    st.markdown(f"""<div class="progress-container">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.2rem;">
+            <span style="color:#a0a0b0; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.06em; font-weight:500;">Daily Progress</span>
+            <span style="color:{color}; font-weight:700; font-size:1.05rem;">{pct}%</span>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        <div class="progress-bar-track"><div class="progress-bar-fill" style="width:{pct}%; background:linear-gradient(90deg, {color}, {color}dd);"></div></div>
+        <div style="display:flex; justify-content:space-between; margin-top:0.3rem;">
+            <span style="color:#6b6b80; font-size:0.75rem;">{current} / {goal} kcal</span>
+            <span style="color:{color}; font-size:0.75rem; font-weight:500;">{status}</span>
+        </div>
+    </div>""", unsafe_allow_html=True)
+
+
+def render_calorie_ring(eaten: int, goal: int, remaining: int, burned: int = 0) -> None:
+    pct = min(100, int((eaten / goal) * 100)) if goal > 0 else 0
+    stroke_color = "#00d4aa" if pct < 75 else ("#f39c12" if pct < 100 else "#e74c3c")
+    circumference = 2 * math.pi * 56
+    offset = circumference * (1 - pct / 100)
+    st.markdown(f"""<div class="calorie-ring-wrap">
+        <div class="calorie-ring">
+            <svg viewBox="0 0 128 128" width="140" height="140">
+                <circle cx="64" cy="64" r="56" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="10"/>
+                <circle cx="64" cy="64" r="56" fill="none" stroke="{stroke_color}" stroke-width="10"
+                    stroke-dasharray="{circumference}" stroke-dashoffset="{offset}"
+                    stroke-linecap="round" style="transition: stroke-dashoffset 0.8s cubic-bezier(.4,0,.2,1);"/>
+            </svg>
+            <div class="calorie-ring-label"><span class="ring-value">{remaining}</span><span class="ring-unit">remaining</span></div>
+        </div>
+        <div class="calorie-ring-details">
+            <div class="ring-row"><span class="ring-row-label"><span class="dot" style="background:#6c5ce7;"></span>Goal</span><span class="ring-row-value">{goal}</span></div>
+            <div class="ring-row"><span class="ring-row-label"><span class="dot" style="background:{stroke_color};"></span>Food</span><span class="ring-row-value">{eaten}</span></div>
+            <div class="ring-row"><span class="ring-row-label"><span class="dot" style="background:#e74c3c;"></span>Exercise</span><span class="ring-row-value">-{burned}</span></div>
+            <div class="ring-row" style="border-bottom:none; padding-top:0.5rem;"><span class="ring-row-label" style="font-weight:600; color:var(--ink);">Net</span><span class="ring-row-value" style="color:{stroke_color}; font-size:1.05rem;">{remaining}</span></div>
+        </div>
+    </div>""", unsafe_allow_html=True)
+
+
+def render_water_visual(intake: int, goal: int) -> None:
+    glasses_html = "".join(f'<span class="water-glass {"filled" if i < intake else ""}">\U0001f4a7</span>' for i in range(goal))
+    pct = min(100, int((intake / goal) * 100)) if goal > 0 else 0
+    st.markdown(f"""<div class="progress-container">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+            <span style="color:var(--ink); font-weight:600; font-size:0.9rem;">\U0001f4a7 Water Intake</span>
+            <span style="color:#3b82f6; font-weight:700; font-size:1.05rem;">{intake}/{goal}</span>
+        </div>
+        <div class="water-visual">{glasses_html}</div>
+        <div class="progress-bar-track" style="margin-top:0.5rem;"><div class="progress-bar-fill" style="width:{pct}%; background:linear-gradient(90deg, #3b82f6, #60a5fa);"></div></div>
+        <div style="text-align:right; margin-top:0.2rem;"><span style="color:#6b6b80; font-size:0.72rem;">{pct}% of daily goal</span></div>
+    </div>""", unsafe_allow_html=True)
+
+
+def render_section_header(icon: str, text: str, bg_color: str = "rgba(255,107,53,0.12)") -> None:
+    st.markdown(f'<div class="section-head"><div class="sh-icon" style="background:{bg_color};">{icon}</div><div class="sh-text">{text}</div></div>', unsafe_allow_html=True)
+
+
+def render_macro_bars(calories: int) -> None:
+    protein_g = int(calories * 0.30 / 4)
+    carbs_g = int(calories * 0.45 / 4)
+    fat_g = int(calories * 0.25 / 9)
+    protein_pct = min(100, int(protein_g / 150 * 100)) if calories > 0 else 0
+    carbs_pct = min(100, int(carbs_g / 300 * 100)) if calories > 0 else 0
+    fat_pct = min(100, int(fat_g / 70 * 100)) if calories > 0 else 0
+    st.markdown(f"""<div class="macro-wrap">
+        <div class="macro-item"><div class="mi-label">Protein</div><div class="mi-value">{protein_g}g</div><div class="mi-bar"><div class="mi-fill" style="width:{protein_pct}%; background:linear-gradient(90deg, #6c5ce7, #a29bfe);"></div></div></div>
+        <div class="macro-item"><div class="mi-label">Carbs</div><div class="mi-value">{carbs_g}g</div><div class="mi-bar"><div class="mi-fill" style="width:{carbs_pct}%; background:linear-gradient(90deg, #00d4aa, #55efc4);"></div></div></div>
+        <div class="macro-item"><div class="mi-label">Fat</div><div class="mi-value">{fat_g}g</div><div class="mi-bar"><div class="mi-fill" style="width:{fat_pct}%; background:linear-gradient(90deg, #ff6b35, #fdcb6e);"></div></div></div>
+    </div>""", unsafe_allow_html=True)
+
+
+def render_motivation_banner() -> None:
+    day_index = datetime.date.today().toordinal() % len(TIPS)
+    icon, text = TIPS[day_index]
+    st.markdown(f"""<div class="motivation-banner">
+        <div class="mb-icon">{icon}</div>
+        <div><div class="mb-label">Daily Tip</div><div class="mb-text">{text}</div></div>
+    </div>""", unsafe_allow_html=True)
 
 
 def load_dashboard_data(api_base_url: str) -> tuple[list[dict], dict, dict]:
@@ -175,50 +391,26 @@ def load_dashboard_data(api_base_url: str) -> tuple[list[dict], dict, dict]:
 
 
 def get_goal_value(user: dict) -> int:
-    """Calculate daily calorie goal based on user profile."""
     if "daily_calorie_target" in user:
         return int(user["daily_calorie_target"])
-
-    # BMR calculation using Mifflin-St Jeor Equation
-    age = user.get("age", 25)
-    weight = user.get("weight", 70)  # kg
-    height = user.get("height", 175)  # cm
+    age, weight, height = user.get("age", 25), user.get("weight", 70), user.get("height", 175)
     goal = user.get("goal", "Maintain")
-
-    # BMR for men (assuming male for simplicity)
     bmr = 10 * weight + 6.25 * height - 5 * age + 5
-
     if goal == "Lose":
-        return int(bmr * 0.8)  # 20% deficit
+        return int(bmr * 0.8)
     elif goal == "Gain":
-        return int(bmr * 1.2)  # 20% surplus
-    else:  # Maintain
-        return int(bmr)
-
-
-def calculate_bmi(user: dict) -> str:
-    """Calculate BMI from user data."""
-    try:
-        height_m = user.get("height", 175) / 100
-        weight = user.get("weight", 70)
-        if height_m > 0:
-            bmi = weight / (height_m * height_m)
-            return f"{bmi:.1f}"
-        return "N/A"
-    except (TypeError, ZeroDivisionError):
-        return "N/A"
+        return int(bmr * 1.2)
+    return int(bmr)
 
 
 def bmi_category(bmi: float) -> str:
-    """Get BMI category."""
     if bmi < 18.5:
         return "Underweight"
     elif bmi < 25:
         return "Normal"
     elif bmi < 30:
         return "Overweight"
-    else:
-        return "Obese"
+    return "Obese"
 
 
 def load_users(api_base_url: str) -> list[dict]:
@@ -227,88 +419,81 @@ def load_users(api_base_url: str) -> list[dict]:
 
 def get_current_user_name(api_base_url: str) -> str:
     try:
-        user = api_call("GET", "/api/user", api_base_url).get("user", {})
-        return user.get("name", "Dawood")
+        return api_call("GET", "/api/user", api_base_url).get("user", {}).get("name", "Dawood")
     except requests.RequestException:
         return "Dawood"
 
 
 def show_login_screen() -> None:
-    st.markdown(
-        """
-        <div style="display: flex; justify-content: center; align-items: center; min-height: 80vh;">
-            <div style="text-align: center; max-width: 400px;">
-                <h1 style="color: #00d4aa; margin-bottom: 2rem;">🍜 HK Calorie Tracker</h1>
-                <p style="color: #cccccc; margin-bottom: 2rem; font-size: 1.1rem;">Select your profile to continue tracking your calories</p>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown("<style>[data-testid='stSidebar']{display:none;}</style>", unsafe_allow_html=True)
+    _, center, _ = st.columns([1, 2.2, 1])
+    with center:
+        st.markdown("""<div style="text-align:center; padding-top:1.5rem;">
+            <div class="login-logo">\U0001f35c</div>
+            <div class="login-title">HK Calorie Tracker</div>
+            <div class="login-subtitle">Your personal Hong Kong nutrition companion</div>
+        </div>""", unsafe_allow_html=True)
 
-    # Center the login form
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown("### Login to Your Profile")
-
-        api_base_url = st.text_input("API URL (optional)", value=DEFAULT_API_URL, key="login_api_url")
-
+        api_base_url = DEFAULT_API_URL
         try:
             users = load_users(api_base_url)
         except requests.RequestException:
-            st.error("Could not connect to API. Please check the URL and ensure the backend is running.")
+            st.error("Cannot connect to API \u2014 make sure Flask backend is running on port 5050.")
+            with st.expander("\u2699\ufe0f Custom API URL"):
+                api_base_url = st.text_input("API URL", value=DEFAULT_API_URL, key="login_api_url")
             return
 
-        if not users:
-            st.warning("No user profiles found. Create your first profile below.")
-        else:
-            user_names = [user["name"] for user in users]
+        sign_in, sign_up = st.tabs(["\U0001f513 Sign In", "\u2728 Create Account"])
 
-            selected_user = st.selectbox("Select your profile", user_names, key="login_user_select")
-
-            if st.button("Login", type="primary", use_container_width=True):
-                try:
-                    # Switch to selected user
-                    api_call("POST", "/api/users/select", api_base_url, {"name": selected_user})
-                    st.session_state["logged_in_user"] = selected_user
-                    st.session_state["api_base_url"] = api_base_url
-                    st.success(f"Welcome back, {selected_user}!")
-                    st.rerun()
-                except requests.RequestException as err:
-                    st.error(f"Could not login: {err}")
-
-        st.markdown("---")
-        st.markdown("### Create New Profile")
-
-        new_name = st.text_input("Name", key="login_new_name")
-        new_age = st.number_input("Age", min_value=1, step=1, key="login_new_age")
-        new_weight = st.number_input("Weight (kg)", min_value=1.0, step=0.5, key="login_new_weight")
-        new_height = st.number_input("Height (cm)", min_value=1.0, step=0.5, key="login_new_height")
-        new_goal = st.selectbox("Goal", options=["Maintain", "Lose", "Gain"], key="login_new_goal")
-
-        if st.button("Create Profile", type="primary", use_container_width=True):
-            if not new_name.strip():
-                st.error("Name is required.")
-            elif users and new_name.strip().lower() in {user["name"].lower() for user in users}:
-                st.warning("A profile with this name already exists.")
+        with sign_in:
+            if not users:
+                st.markdown('<div style="text-align:center; padding:1rem 0; color:var(--muted);"><div style="font-size:2rem; margin-bottom:0.3rem;">\U0001f44b</div><p style="font-size:0.9rem; margin:0;">No profiles yet</p><p style="font-size:0.8rem; color:var(--muted);">Head to <b>Create Account</b> to get started</p></div>', unsafe_allow_html=True)
             else:
-                try:
-                    api_call(
-                        "POST",
-                        "/api/users",
-                        api_base_url,
-                        {
-                            "name": new_name,
-                            "age": int(new_age),
-                            "weight": float(new_weight),
-                            "height": float(new_height),
-                            "goal": new_goal,
-                        },
-                    )
-                    st.success(f"Profile '{new_name}' created! You can now login.")
-                    st.rerun()
-                except requests.RequestException as err:
-                    st.error(f"Could not create profile: {err}")
+                user_names = [u["name"] for u in users]
+                selected_user = st.selectbox("Profile", user_names, key="login_user_select", label_visibility="collapsed", format_func=lambda n: f"\U0001f464  {n}")
+                if st.button("Sign In \u2192", type="primary", use_container_width=True):
+                    try:
+                        api_call("POST", "/api/users/select", api_base_url, {"name": selected_user})
+                        st.session_state["logged_in_user"] = selected_user
+                        st.session_state["api_base_url"] = api_base_url
+                        st.rerun()
+                    except requests.RequestException as err:
+                        st.error(f"Login failed: {err}")
+
+        with sign_up:
+            r1c1, r1c2 = st.columns(2, gap="medium")
+            with r1c1:
+                new_name = st.text_input("Name", placeholder="e.g. Dawood", key="login_new_name")
+            with r1c2:
+                new_goal = st.selectbox("Goal", ["Maintain", "Lose", "Gain"], key="login_new_goal")
+            r2c1, r2c2, r2c3 = st.columns(3, gap="medium")
+            with r2c1:
+                new_age = st.number_input("Age", min_value=1, max_value=120, step=1, value=20, key="login_new_age")
+            with r2c2:
+                new_weight = st.number_input("Weight (kg)", min_value=20.0, max_value=300.0, step=0.5, value=70.0, key="login_new_weight")
+            with r2c3:
+                new_height = st.number_input("Height (cm)", min_value=50.0, max_value=250.0, step=0.5, value=175.0, key="login_new_height")
+            if st.button("Create Account \u2192", type="primary", use_container_width=True):
+                if not new_name.strip():
+                    st.error("Name is required.")
+                elif users and new_name.strip().lower() in {u["name"].lower() for u in users}:
+                    st.warning("This name already exists.")
+                else:
+                    try:
+                        api_call("POST", "/api/users", api_base_url, {"name": new_name.strip(), "age": int(new_age), "weight": float(new_weight), "height": float(new_height), "goal": new_goal})
+                        st.success(f"Welcome, {new_name.strip()}! Switch to Sign In.")
+                        st.rerun()
+                    except requests.RequestException as err:
+                        st.error(f"Could not create profile: {err}")
+
+        st.markdown("""<div class="login-features" style="margin-top:0.8rem;">
+            <div class="login-feature"><div class="login-feature-icon">\U0001f525</div>Calories</div>
+            <div class="login-feature"><div class="login-feature-icon">\U0001f4a7</div>Water</div>
+            <div class="login-feature"><div class="login-feature-icon">\U0001f3c3</div>Exercise</div>
+            <div class="login-feature"><div class="login-feature-icon">\U0001f4ca</div>Insights</div>
+            <div class="login-feature"><div class="login-feature-icon">\U0001f35c</div>HK Foods</div>
+        </div>
+        <p style="text-align:center; color:#4a4a5a; font-size:0.68rem; margin-top:0.8rem; letter-spacing:0.04em;">Track meals \u00b7 Log exercise \u00b7 Set goals \u00b7 Stay healthy</p>""", unsafe_allow_html=True)
 
 
 def show_main_dashboard() -> None:
@@ -316,32 +501,24 @@ def show_main_dashboard() -> None:
     logged_in_user = st.session_state["logged_in_user"]
 
     with st.sidebar:
-        st.markdown(f"## Welcome, {logged_in_user}")
+        st.markdown(f'<div class="sidebar-badge"><div class="badge-name">\U0001f35c {logged_in_user}</div><div class="badge-sub">Active Profile</div></div>', unsafe_allow_html=True)
         st.markdown("---")
-
         st.markdown("## Connection")
         api_base_url_input = st.text_input("Flask API URL", value=api_base_url, key="dashboard_api_url")
         if api_base_url_input != api_base_url:
             st.session_state["api_base_url"] = api_base_url_input
             api_base_url = api_base_url_input
-
         if st.button("Check API Health"):
             try:
                 health = api_call("GET", "/health", api_base_url)
                 st.success(f"API reachable: {health.get('status', 'unknown')}")
             except requests.RequestException as err:
                 st.error(f"API not reachable: {err}")
-
         st.markdown("---")
-
-        if st.button("Logout", type="secondary"):
-            if "logged_in_user" in st.session_state:
-                del st.session_state["logged_in_user"]
-            if "api_base_url" in st.session_state:
-                del st.session_state["api_base_url"]
-            st.success("Logged out successfully!")
+        if st.button("\U0001f6aa Logout", type="secondary"):
+            for key in ("logged_in_user", "api_base_url"):
+                st.session_state.pop(key, None)
             st.rerun()
-
         st.markdown("---")
 
         try:
@@ -350,269 +527,349 @@ def show_main_dashboard() -> None:
             users = []
 
         if users:
-            user_names = [user["name"] for user in users]
+            user_names = [u["name"] for u in users]
             current_name = st.session_state.get("logged_in_user", get_current_user_name(api_base_url))
-            if current_name in user_names:
-                selected_index = user_names.index(current_name)
-            else:
-                selected_index = 0
-
+            selected_index = user_names.index(current_name) if current_name in user_names else 0
             selected_profile = st.selectbox("Switch profile", user_names, index=selected_index, key="switch_profile")
             if st.button("Switch profile"):
                 try:
                     api_call("POST", "/api/users/select", api_base_url, {"name": selected_profile})
                     st.session_state["logged_in_user"] = selected_profile
-                    st.success(f"Switched to profile: {selected_profile}")
                     st.rerun()
                 except requests.RequestException as err:
-                    st.error(f"Could not switch profile: {err}")
-        else:
-            st.info("No profiles found. Create a new profile below.")
+                    st.error(f"Could not switch: {err}")
 
-        with st.expander("Create a new profile"):
+        with st.expander("\u2795 Create profile"):
             new_name = st.text_input("Name", key="new_name")
             new_age = st.number_input("Age", min_value=1, step=1, key="new_age")
             new_weight = st.number_input("Weight (kg)", min_value=1.0, step=0.5, key="new_weight")
             new_height = st.number_input("Height (cm)", min_value=1.0, step=0.5, key="new_height")
-            new_goal = st.selectbox("Goal", options=["Maintain", "Lose", "Gain"], key="new_goal")
-
+            new_goal = st.selectbox("Goal", ["Maintain", "Lose", "Gain"], key="new_goal")
             if st.button("Create profile"):
                 if not new_name.strip():
                     st.error("Name is required.")
-                elif new_name.strip().lower() in {user["name"].lower() for user in users}:
-                    st.warning("A profile with this name already exists.")
+                elif new_name.strip().lower() in {u["name"].lower() for u in users}:
+                    st.warning("Already exists.")
                 else:
                     try:
-                        api_call(
-                            "POST",
-                            "/api/users",
-                            api_base_url,
-                            {
-                                "name": new_name,
-                                "age": int(new_age),
-                                "weight": float(new_weight),
-                                "height": float(new_height),
-                                "goal": new_goal,
-                            },
-                        )
+                        api_call("POST", "/api/users", api_base_url, {"name": new_name, "age": int(new_age), "weight": float(new_weight), "height": float(new_height), "goal": new_goal})
                         st.success("Profile created.")
                         st.rerun()
                     except requests.RequestException as err:
-                        st.error(f"Could not create profile: {err}")
+                        st.error(f"Error: {err}")
 
         if len(users) > 1:
-            with st.expander("Delete a profile"):
-                delete_name = st.selectbox("Select profile to delete", [u["name"] for u in users], key="delete_name")
-                confirm_delete = st.checkbox("I confirm I want to delete this profile", key="confirm_delete")
-                if st.button("Delete profile"):
-                    if not confirm_delete:
-                        st.error("Please confirm deletion.")
+            with st.expander("\U0001f5d1\ufe0f Delete profile"):
+                delete_name = st.selectbox("Select profile", [u["name"] for u in users], key="delete_name")
+                confirm = st.checkbox("Confirm deletion", key="confirm_delete")
+                if st.button("Delete"):
+                    if not confirm:
+                        st.error("Please confirm.")
                     else:
                         try:
                             api_call("DELETE", "/api/users", api_base_url, {"name": delete_name})
-                            st.success(f"Profile '{delete_name}' deleted.")
+                            st.success(f"Deleted '{delete_name}'.")
                             if st.session_state.get("logged_in_user") == delete_name:
                                 del st.session_state["logged_in_user"]
-                                st.rerun()
                             st.rerun()
                         except requests.RequestException as err:
-                            st.error(f"Could not delete profile: {err}")
+                            st.error(f"Error: {err}")
 
-        st.markdown("---")
-        st.markdown("#### Controls")
-        st.caption("Run Flask first, then this Streamlit app.")
-        st.markdown("---")
-        st.markdown("#### About")
-        st.write("Build your Hong Kong calorie tracker with a modern UI for meals, metrics, and progress.")
-
-    st.markdown(
-        """
-        <section class="hero">
-            <div style="display:flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
-                <div>
-                    <h1>HK Calorie Tracker</h1>
-                    <p>Track meals, manage foods, and stay within your daily calorie goal with a clean fitness-style dashboard.</p>
-                </div>
-                <div style="text-align:right; min-width: 180px;">
-                    <p style="margin:0; color:#00d4aa; font-weight:700; letter-spacing:0.16em; text-transform:uppercase;">Health Mode</p>
-                    <p style="margin:0.35rem 0 0; color:#cccccc;">Balanced meals, energy, and progress in one place.</p>
-                </div>
-            </div>
-        </section>
-        """,
-        unsafe_allow_html=True,
-    )
-
+    # Load data
     try:
         foods, log_data, user = load_dashboard_data(api_base_url)
     except requests.RequestException as err:
-        st.error("Could not load data from backend. Start Flask API and check the URL in the sidebar.")
+        st.error("Could not load data. Start Flask API and check URL.")
         st.exception(err)
         return
 
     calorie_status = log_data.get("total_calories", 0)
     goal_value = get_goal_value(user)
-    bmi_value = calculate_bmi(user)
-    bmi_label = bmi_category(float(bmi_value)) if bmi_value != "N/A" else ""
+    water_intake = user.get("water_intake", 0)
+    water_goal = user.get("water_goal", 8)
+    streak = user.get("streak", 0)
+    exercise_burned = user.get("exercise_burned", 0)
+    exercises = user.get("exercises", [])
 
-    col_a, col_b, col_c, col_d = st.columns([1, 1, 1, 1], gap="large")
-    with col_a:
-        render_stat_card("Foods in database", str(len(foods)), "🥢")
-    with col_b:
-        render_stat_card("Today's entries", str(log_data.get("entry_count", 0)), "📝")
-    with col_c:
-        render_stat_card("Total calories", str(calorie_status), "🔥")
-    with col_d:
-        render_stat_card("Daily goal", f"{goal_value} kcal", "🎯")
+    hour = datetime.datetime.now().hour
+    greeting = "morning" if hour < 12 else "afternoon" if hour < 18 else "evening"
+
+    # Hero
+    st.markdown(f"""<section class="hero">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
+            <div>
+                <h1 style="margin:0 0 0.2rem; font-size:1.6rem;">Good {greeting}, {logged_in_user} \U0001f44b</h1>
+                <p style="margin:0; color:var(--ink-secondary); font-size:0.88rem;">Here's your nutrition overview for today.</p>
+            </div>
+            <div style="text-align:right; min-width:140px;">
+                <p style="margin:0; color:var(--accent-2); font-weight:700; letter-spacing:0.1em; text-transform:uppercase; font-size:0.75rem;">\U0001f525 {streak} Day Streak</p>
+                <p style="margin:0.2rem 0 0; color:var(--muted); font-size:0.78rem;">{datetime.date.today().strftime('%B %d, %Y')}</p>
+            </div>
+        </div>
+    </section>""", unsafe_allow_html=True)
+
+    render_motivation_banner()
+
+    # Calorie Ring + Stats
+    net_remaining = max(0, goal_value - calorie_status + exercise_burned)
+    ring_left, ring_right = st.columns([0.55, 0.45], gap="large")
+    with ring_left:
+        render_calorie_ring(calorie_status, goal_value, net_remaining, exercise_burned)
+    with ring_right:
+        m_a, m_b = st.columns(2, gap="medium")
+        with m_a:
+            render_stat_card("Eaten", str(calorie_status), "\U0001f525")
+        with m_b:
+            render_stat_card("Remaining", str(net_remaining), "\U0001f3af")
+        m_c, m_d = st.columns(2, gap="medium")
+        with m_c:
+            render_stat_card("Burned", str(exercise_burned), "\U0001f3c3")
+        with m_d:
+            render_stat_card("Water", f"{water_intake}/{water_goal}", "\U0001f4a7")
+
+    render_macro_bars(calorie_status)
+    render_progress_bar(calorie_status, goal_value)
 
     if calorie_status > goal_value:
-        st.error("You have exceeded today's calorie goal. Try lighter meals or reset the day.")
-    elif calorie_status > 0 and calorie_status <= goal_value:
-        st.success("You are within today's calorie goal. Keep it up!")
-    elif calorie_status == 0:
-        st.info("Start logging food to track your daily intake.")
+        st.error("\u26a0\ufe0f You've exceeded your daily calorie goal!")
+    elif calorie_status > 0:
+        st.success("\u2705 You're within your calorie budget. Keep going!")
 
     st.markdown("<div class='theme-divider'></div>", unsafe_allow_html=True)
 
-    st.subheader("BMI Calculator")
-    bmi_col1, bmi_col2, bmi_col3 = st.columns([1, 1, 1], gap="large")
-    with bmi_col1:
-        calc_height = st.number_input("Height (cm)", min_value=1.0, step=0.5, value=175.0, key="bmi_height")
-    with bmi_col2:
-        calc_weight = st.number_input("Weight (kg)", min_value=1.0, step=0.5, value=70.0, key="bmi_weight")
-    with bmi_col3:
-        st.write("")
-        st.write("")
-        if st.button("Calculate BMI"):
-            try:
-                height_m = calc_height / 100
-                bmi_result = calc_weight / (height_m * height_m)
-                bmi_cat = bmi_category(bmi_result)
-                st.metric("Your BMI", f"{bmi_result:.1f}", bmi_cat)
-            except ZeroDivisionError:
-                st.error("Height must be greater than 0")
+    # Tabs
+    tab_diary, tab_exercise, tab_water, tab_foods, tab_goals, tab_history = st.tabs(
+        ["\U0001f4cb Food Diary", "\U0001f3c3 Exercise", "\U0001f4a7 Water", "\U0001f962 Foods", "\U0001f3af Goals & BMI", "\U0001f4ca Insights"]
+    )
 
-    st.markdown("<div class='theme-divider'></div>", unsafe_allow_html=True)
+    # Food Diary
+    with tab_diary:
+        render_section_header("\U0001f4cb", "Food Diary", "rgba(0,212,170,0.12)")
+        meal_totals = log_data.get("meal_totals", {})
+        if meal_totals:
+            meal_icons = {"Breakfast": "\U0001f373", "Lunch": "\U0001f35c", "Dinner": "\U0001f355", "Snack": "\U0001f36a", "General": "\U0001f37d\ufe0f"}
+            meal_cols = st.columns(len(meal_totals), gap="medium")
+            for i, (meal_name, meal_cal) in enumerate(meal_totals.items()):
+                with meal_cols[i]:
+                    render_stat_card(meal_name, f"{meal_cal} kcal", meal_icons.get(meal_name, "\U0001f37d\ufe0f"))
+            st.markdown("<div class='theme-divider'></div>", unsafe_allow_html=True)
 
-    st.subheader("Set Calorie Goals")
-    goal_col1, goal_col2, goal_col3 = st.columns([1, 1, 1], gap="large")
-    with goal_col1:
-        current_target = int(user.get("daily_calorie_target", goal_value))
-        new_target = st.number_input("Daily calorie target (kcal)", min_value=800, max_value=10000, step=50, value=current_target, key="goal_target")
-    with goal_col2:
-        st.write("")
-        st.write("")
-        if st.button("Save calorie goal"):
-            try:
-                api_call("PUT", "/api/user", api_base_url, {
-                    "name": user.get("name", ""),
-                    "age": int(user.get("age", 20)),
-                    "weight": float(user.get("weight", 70)),
-                    "height": float(user.get("height", 175)),
-                    "goal": user.get("goal", "Maintain"),
-                    "daily_calorie_target": int(new_target),
-                })
-                st.success(f"Daily calorie goal set to {new_target} kcal")
-                st.rerun()
-            except requests.RequestException as err:
-                st.error(f"Could not save goal: {err}")
-    with goal_col3:
-        st.metric("Current Goal", f"{current_target} kcal")
+        diary_left, diary_right = st.columns([0.55, 0.45], gap="large")
+        with diary_left:
+            if log_data.get("entries"):
+                for entry in log_data["entries"]:
+                    mi = {"Breakfast": "\U0001f373", "Lunch": "\U0001f35c", "Dinner": "\U0001f355", "Snack": "\U0001f36a"}.get(entry.get("meal", ""), "\U0001f37d\ufe0f")
+                    st.markdown(f'<div class="entry-row"><span style="flex:0.3; text-align:center;">{mi}</span><span class="entry-name">{entry["food_name"]}</span><span class="entry-qty">{entry["quantity"]}x</span><span class="entry-cal">{entry["total_calories"]} kcal</span></div>', unsafe_allow_html=True)
+            else:
+                st.info("No food logged yet today. Use the form to start tracking!")
 
-    st.markdown("<div class='theme-divider'></div>", unsafe_allow_html=True)
-
-    st.subheader("Weekly Calorie History")
-    history = user.get("weekly_history", [])
-    if history and len(history) > 0:
-        hist_col1, hist_col2 = st.columns([0.6, 0.4], gap="large")
-        with hist_col1:
-            st.bar_chart(history)
-        with hist_col2:
-            history_rows = [{"Day": f"Day {i + 1}", "Calories": value} for i, value in enumerate(history)]
-            st.table(history_rows)
-    else:
-        st.info("No weekly history yet. Log food and reset the day to build history.")
-
-    st.markdown("<div class='theme-divider'></div>", unsafe_allow_html=True)
-
-    left, right = st.columns([0.6, 0.4], gap="large")
-
-    with left:
-        st.subheader("Food Database")
-        with st.form("food_form"):
-            food_name = st.text_input("Food name", placeholder="e.g. Char Siu Rice")
-            food_calories = st.number_input("Calories", min_value=1, step=10, value=300)
-            food_category = st.selectbox("Category", options=["Food", "Drink", "Snack", "Dessert", "General"], index=0)
-            submitted = st.form_submit_button("Add Food")
-
-            if submitted:
+        with diary_right:
+            st.markdown("**Quick Log**")
+            with st.form("log_form"):
+                selected_food = st.selectbox("Select food", [f["name"] for f in foods], key="log_food_select")
+                q_col, m_col = st.columns(2)
+                with q_col:
+                    quantity = st.number_input("Qty", min_value=1, step=1, value=1, key="log_quantity")
+                with m_col:
+                    meal_type = st.selectbox("Meal", ["Breakfast", "Lunch", "Dinner", "Snack", "General"], key="log_meal_type")
+                if st.form_submit_button("Log Food", use_container_width=True):
+                    if foods:
+                        try:
+                            api_call("POST", "/api/log", api_base_url, {"food_name": selected_food, "quantity": int(quantity), "meal": meal_type})
+                            st.success(f"Logged {quantity}x {selected_food}")
+                            st.rerun()
+                        except requests.RequestException as err:
+                            st.error(f"Could not log: {err}")
+            if st.button("\U0001f504 Reset Day", use_container_width=True):
                 try:
-                    api_call(
-                        "POST",
-                        "/api/foods",
-                        api_base_url,
-                        {"name": food_name, "calories": int(food_calories), "category": food_category},
-                    )
-                    st.success("Food added to database")
+                    api_call("DELETE", "/api/log", api_base_url)
+                    st.success("Day reset!")
                     st.rerun()
                 except requests.RequestException as err:
-                    st.error(f"Could not add food: {err}")
+                    st.error(f"Error: {err}")
 
-        if foods:
-            st.dataframe(foods, use_container_width=True, hide_index=True)
+    # Exercise
+    with tab_exercise:
+        render_section_header("\U0001f3c3", "Exercise Tracker", "rgba(108,92,231,0.12)")
+        ex_left, ex_right = st.columns([0.55, 0.45], gap="large")
+        with ex_left:
+            total_duration = sum(e.get("duration_min", 0) for e in exercises)
+            s_a, s_b, s_c = st.columns(3, gap="medium")
+            with s_a:
+                render_stat_card("Burned", f"{exercise_burned} kcal", "\U0001f525")
+            with s_b:
+                render_stat_card("Activities", str(len(exercises)), "\U0001f3cb\ufe0f")
+            with s_c:
+                render_stat_card("Duration", f"{total_duration} min", "\u23f1\ufe0f")
+            if exercises:
+                st.markdown("**Today's Activities**")
+                for ex in exercises:
+                    st.markdown(f'<div class="exercise-entry"><span class="ex-name">{ex["name"]}</span><span class="ex-dur">{ex.get("duration_min", 30)} min</span><span class="ex-cal">-{ex["calories_burned"]} kcal</span></div>', unsafe_allow_html=True)
+            else:
+                st.info("No exercises logged today. Add one to offset your calories!")
+        with ex_right:
+            st.markdown("**Log Exercise**")
+            preset_names = list(EXERCISE_PRESETS.keys())
+            preset = st.selectbox("Quick preset", ["Custom"] + preset_names, key="exercise_preset")
+            with st.form("exercise_form"):
+                if preset != "Custom":
+                    ex_name = preset.split(" ", 1)[1].split(" (")[0]
+                    ex_cal_default = EXERCISE_PRESETS[preset]
+                else:
+                    ex_name = ""
+                    ex_cal_default = 200
+                ex_name_input = st.text_input("Activity name", value=ex_name, key="ex_name")
+                ec1, ec2 = st.columns(2)
+                with ec1:
+                    ex_cal = st.number_input("Calories burned", min_value=1, step=10, value=ex_cal_default, key="ex_cal")
+                with ec2:
+                    ex_dur = st.number_input("Duration (min)", min_value=1, step=5, value=30, key="ex_dur")
+                if st.form_submit_button("Log Exercise", use_container_width=True):
+                    if ex_name_input.strip():
+                        try:
+                            api_call("POST", "/api/exercise", api_base_url, {"name": ex_name_input.strip(), "calories_burned": int(ex_cal), "duration_min": int(ex_dur)})
+                            st.success(f"Logged {ex_name_input.strip()} (-{ex_cal} kcal)")
+                            st.rerun()
+                        except requests.RequestException as err:
+                            st.error(f"Error: {err}")
+                    else:
+                        st.error("Activity name is required.")
 
-    with right:
-        st.subheader("Log Food")
-        with st.form("log_form"):
-            selected_food = st.selectbox("Select food", [f["name"] for f in foods], key="log_food_select")
-            quantity = st.number_input("Quantity", min_value=1, step=1, value=1, key="log_quantity")
-            log_button = st.form_submit_button("Log Food")
+    # Water
+    with tab_water:
+        render_section_header("\U0001f4a7", "Water Tracker", "rgba(59,130,246,0.12)")
+        w_left, w_right = st.columns([0.6, 0.4], gap="large")
+        with w_left:
+            render_water_visual(water_intake, water_goal)
+        with w_right:
+            glasses_to_add = st.number_input("Glasses to add", min_value=1, max_value=10, step=1, value=1, key="water_add")
+            if st.button("\U0001f4a7 Log Water", use_container_width=True):
+                try:
+                    api_call("POST", "/api/water", api_base_url, {"glasses": int(glasses_to_add)})
+                    st.success(f"Added {glasses_to_add} glass(es)!")
+                    st.rerun()
+                except requests.RequestException as err:
+                    st.error(f"Error: {err}")
+            st.markdown("---")
+            new_water_goal = st.number_input("Daily goal (glasses)", min_value=1, max_value=20, step=1, value=water_goal, key="water_goal_input")
+            if st.button("Set Water Goal", use_container_width=True):
+                try:
+                    api_call("PUT", "/api/water/goal", api_base_url, {"goal": int(new_water_goal)})
+                    st.success(f"Goal \u2192 {new_water_goal} glasses")
+                    st.rerun()
+                except requests.RequestException as err:
+                    st.error(f"Error: {err}")
 
-            if log_button and foods:
-                food_data = next((f for f in foods if f["name"] == selected_food), None)
-                if food_data:
+    # Foods
+    with tab_foods:
+        render_section_header("\U0001f962", "Food Database", "rgba(108,92,231,0.12)")
+        f_left, f_right = st.columns([0.5, 0.5], gap="large")
+        with f_left:
+            st.markdown("**Add New Food**")
+            with st.form("food_form"):
+                food_name = st.text_input("Food name", placeholder="e.g. Char Siu Rice")
+                fc1, fc2 = st.columns(2)
+                with fc1:
+                    food_calories = st.number_input("Calories", min_value=1, step=10, value=300)
+                with fc2:
+                    food_category = st.selectbox("Category", ["Food", "Drink", "Snack", "Dessert", "General"])
+                if st.form_submit_button("Add Food", use_container_width=True):
                     try:
-                        api_call(
-                            "POST",
-                            "/api/log",
-                            api_base_url,
-                            {"food_name": selected_food, "quantity": int(quantity)},
-                        )
-                        st.success(f"Logged {quantity}x {selected_food}")
+                        api_call("POST", "/api/foods", api_base_url, {"name": food_name, "calories": int(food_calories), "category": food_category})
+                        st.success("Food added!")
                         st.rerun()
                     except requests.RequestException as err:
-                        st.error(f"Could not log food: {err}")
+                        st.error(f"Error: {err}")
+        with f_right:
+            st.markdown(f"**{len(foods)} foods in database**")
+            if foods:
+                categories = sorted({f.get("category", "General") for f in foods})
+                cat_filter = st.selectbox("Filter by category", ["All"] + categories, key="food_cat_filter")
+                filtered = foods if cat_filter == "All" else [f for f in foods if f.get("category") == cat_filter]
+                st.dataframe(filtered, use_container_width=True, hide_index=True, height=400)
 
-        if log_data.get("entries"):
-            st.subheader("Today's Entries")
-            for entry in log_data["entries"]:
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col1:
-                    st.write(entry["food_name"])
-                with col2:
-                    st.write(f"{entry['quantity']}x")
-                with col3:
-                    st.write(f"{entry['total_calories']} kcal")
+    # Goals & BMI
+    with tab_goals:
+        render_section_header("\U0001f3af", "Goals & BMI", "rgba(255,107,53,0.12)")
+        g_left, g_right = st.columns([0.5, 0.5], gap="large")
+        with g_left:
+            st.markdown("**Calorie Goal**")
+            current_target = int(user.get("daily_calorie_target", goal_value))
+            new_target = st.number_input("Daily calorie target (kcal)", min_value=800, max_value=10000, step=50, value=current_target, key="goal_target")
+            if st.button("Save Calorie Goal", use_container_width=True):
+                try:
+                    api_call("PUT", "/api/user", api_base_url, {"name": user.get("name", ""), "age": int(user.get("age", 20)), "weight": float(user.get("weight", 70)), "height": float(user.get("height", 175)), "goal": user.get("goal", "Maintain"), "daily_calorie_target": int(new_target)})
+                    st.success(f"Goal \u2192 {new_target} kcal")
+                    st.rerun()
+                except requests.RequestException as err:
+                    st.error(f"Error: {err}")
+            st.metric("Current Goal", f"{current_target} kcal")
+        with g_right:
+            st.markdown("**BMI Calculator**")
+            calc_height = st.number_input("Height (cm)", min_value=1.0, step=0.5, value=float(user.get("height", 175)), key="bmi_height")
+            calc_weight = st.number_input("Weight (kg)", min_value=1.0, step=0.5, value=float(user.get("weight", 70)), key="bmi_weight")
+            if st.button("Calculate BMI", use_container_width=True):
+                try:
+                    height_m = calc_height / 100
+                    bmi_result = calc_weight / (height_m ** 2)
+                    bmi_cat = bmi_category(bmi_result)
+                    color = {"Underweight": "#3b82f6", "Normal": "#00d4aa", "Overweight": "#f39c12", "Obese": "#e74c3c"}.get(bmi_cat, "#a0a0b0")
+                    st.markdown(f'<div class="insight-card"><div class="ic-label">Your BMI</div><div class="ic-value" style="color:{color};">{bmi_result:.1f}</div><div class="ic-sub">{bmi_cat}</div></div>', unsafe_allow_html=True)
+                except ZeroDivisionError:
+                    st.error("Height must be > 0")
 
-        if st.button("Reset Day"):
-            try:
-                api_call("POST", "/api/reset", api_base_url)
-                st.success("Day reset successfully")
-                st.rerun()
-            except requests.RequestException as err:
-                st.error(f"Could not reset day: {err}")
+    # Insights & History
+    with tab_history:
+        render_section_header("\U0001f4ca", "Insights & History", "rgba(0,212,170,0.12)")
+        history = user.get("weekly_history", [])
+        avg_cal = sum(history) / len(history) if history else 0
+        max_cal = max(history) if history else 0
+        min_cal = min(h for h in history if h > 0) if any(h > 0 for h in history) else 0
+        total_days = len([h for h in history if h > 0])
+
+        i_a, i_b, i_c, i_d = st.columns(4, gap="medium")
+        with i_a:
+            st.markdown(f'<div class="insight-card"><div class="ic-label">7-Day Average</div><div class="ic-value">{avg_cal:.0f}</div><div class="ic-sub">kcal / day</div></div>', unsafe_allow_html=True)
+        with i_b:
+            st.markdown(f'<div class="insight-card"><div class="ic-label">Peak Day</div><div class="ic-value">{max_cal}</div><div class="ic-sub">kcal</div></div>', unsafe_allow_html=True)
+        with i_c:
+            st.markdown(f'<div class="insight-card"><div class="ic-label">Lightest Day</div><div class="ic-value">{min_cal}</div><div class="ic-sub">kcal</div></div>', unsafe_allow_html=True)
+        with i_d:
+            st.markdown(f'<div class="insight-card"><div class="ic-label">Active Days</div><div class="ic-value">{total_days}/{len(history)}</div><div class="ic-sub">tracked</div></div>', unsafe_allow_html=True)
+
+        st.markdown("<div class='theme-divider'></div>", unsafe_allow_html=True)
+
+        if history:
+            h_left, h_right = st.columns([0.6, 0.4], gap="large")
+            with h_left:
+                st.markdown("**Calorie Trend**")
+                st.bar_chart(history)
+            with h_right:
+                st.markdown("**Daily Breakdown**")
+                rows = [{"Day": f"Day {i+1}", "Calories": v, "Status": "\u2705" if 0 < v <= goal_value else ("\u26a0\ufe0f" if v > goal_value else "\u2014")} for i, v in enumerate(history)]
+                st.table(rows)
+
+            on_target = sum(1 for h in history if 0 < h <= goal_value)
+            consistency = int(on_target / len(history) * 100) if history else 0
+            bar_color = "#00d4aa" if consistency >= 70 else "#f39c12" if consistency >= 40 else "#e74c3c"
+            st.markdown(f"""<div class="progress-container">
+                <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                    <span style="color:#a0a0b0; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.06em;">Weekly Consistency</span>
+                    <span style="color:{bar_color}; font-weight:700;">{consistency}%</span>
+                </div>
+                <div class="progress-bar-track"><div class="progress-bar-fill" style="width:{consistency}%; background:{bar_color};"></div></div>
+                <div style="text-align:right; margin-top:0.2rem;"><span style="color:#6b6b80; font-size:0.72rem;">{on_target}/{len(history)} days on target</span></div>
+            </div>""", unsafe_allow_html=True)
+        else:
+            st.info("No weekly history yet. Log food and reset the day to build history.")
 
 
 def main() -> None:
-    st.set_page_config(page_title="HK Calorie Tracker", page_icon="🍜", layout="wide")
+    st.set_page_config(page_title="HK Calorie Tracker", page_icon="\U0001f35c", layout="wide")
     inject_styles()
-
-    # Check if user is logged in
     if "logged_in_user" not in st.session_state:
         show_login_screen()
         return
-
-    # User is logged in, show main dashboard
     show_main_dashboard()
 
 
@@ -621,3 +878,4 @@ if __name__ == "__main__":
         print("This is a Streamlit app. Run: streamlit run streamlit_app.py")
     else:
         main()
+
