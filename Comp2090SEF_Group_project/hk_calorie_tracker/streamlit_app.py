@@ -6,8 +6,11 @@ This UI talks to the Flask API and does not access tracker internals directly.
 from __future__ import annotations
 
 import datetime
+import html as _html
 import math
 import os
+import random
+import re
 import requests
 import streamlit as st
 
@@ -272,6 +275,17 @@ def inject_styles() -> None:
             .stat-card:nth-child(3) { animation-delay: 0.1s; }
             .stat-card:nth-child(4) { animation-delay: 0.15s; }
 
+            .chat-container { max-height: 420px; overflow-y: auto; padding: 0.5rem; display: flex; flex-direction: column; gap: 0.6rem; }
+            .chat-msg { padding: 0.7rem 1rem; border-radius: var(--radius-sm); max-width: 85%; animation: fadeUp 0.3s ease; line-height: 1.5; font-size: 0.88rem; }
+            .chat-user { background: linear-gradient(135deg, rgba(255,107,53,0.15), rgba(255,107,53,0.08)); border: 1px solid rgba(255,107,53,0.2); align-self: flex-end; color: var(--ink); }
+            .chat-bot { background: linear-gradient(135deg, rgba(0,212,170,0.1), rgba(108,92,231,0.08)); border: 1px solid rgba(0,212,170,0.15); align-self: flex-start; color: var(--ink-secondary); }
+            .chat-bot strong { color: var(--ink); }
+            .rec-card { background: linear-gradient(145deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02)); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.2rem; margin-bottom: 0.5rem; }
+            .rec-card .rc-icon { font-size: 1.4rem; margin-bottom: 0.4rem; }
+            .rec-card .rc-title { font-weight: 700; color: var(--ink); font-size: 0.9rem; margin-bottom: 0.3rem; }
+            .rec-card .rc-text { color: var(--ink-secondary); font-size: 0.8rem; line-height: 1.5; }
+            .rec-card .rc-tag { display: inline-block; font-size: 0.65rem; padding: 0.15rem 0.5rem; border-radius: 20px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 0.4rem; }
+
             @media (max-width: 768px) {
                 .hero { padding: 1.2rem; border-radius: var(--radius); }
                 .stat-card { padding: 0.8rem; }
@@ -383,6 +397,121 @@ def render_motivation_banner() -> None:
     </div>""", unsafe_allow_html=True)
 
 
+def generate_recommendations(calorie_status: int, goal_value: int, water_intake: int, water_goal: int, exercise_burned: int, history: list[int], user: dict) -> list[dict]:
+    recs = []
+    goal = user.get("goal", "Maintain")
+    pct = int(calorie_status / goal_value * 100) if goal_value > 0 else 0
+    avg_cal = sum(history) / len(history) if history else 0
+
+    # Calorie-based
+    if pct == 0:
+        recs.append({"icon": "\U0001f373", "title": "Time to eat!", "text": "You haven't logged any food yet today. Start with a healthy breakfast to fuel your morning.", "tag": "Nutrition", "color": "#ff6b35"})
+    elif pct > 100:
+        over = calorie_status - goal_value
+        recs.append({"icon": "\u26a0\ufe0f", "title": f"Over by {over} kcal", "text": f"You've exceeded your goal. Try a 30-min walk (~150 kcal) or light jog (~300 kcal) to balance it out.", "tag": "Alert", "color": "#e74c3c"})
+    elif pct > 85:
+        recs.append({"icon": "\U0001f3af", "title": "Almost at your limit", "text": f"You're at {pct}% of your goal. Choose a light snack like fruits or veggies if you're still hungry.", "tag": "Nutrition", "color": "#f39c12"})
+    elif 40 <= pct <= 60:
+        recs.append({"icon": "\u2705", "title": "Great pacing!", "text": "You're right on track for the day. Keep maintaining this balance through your next meal.", "tag": "Positive", "color": "#00d4aa"})
+
+    # Water
+    water_pct = int(water_intake / water_goal * 100) if water_goal > 0 else 0
+    if water_pct < 50:
+        recs.append({"icon": "\U0001f4a7", "title": "Drink more water", "text": f"You're only at {water_intake}/{water_goal} glasses. Dehydration can be mistaken for hunger \u2014 grab a glass now!", "tag": "Hydration", "color": "#3b82f6"})
+    elif water_pct >= 100:
+        recs.append({"icon": "\U0001f4a7", "title": "Hydration goal met!", "text": "Excellent work staying hydrated today. Proper hydration boosts metabolism by up to 30%.", "tag": "Positive", "color": "#00d4aa"})
+
+    # Exercise
+    if exercise_burned == 0 and calorie_status > 0:
+        recs.append({"icon": "\U0001f3c3", "title": "Add some movement", "text": "No exercise logged today. Even a 15-min walk after meals aids digestion and burns ~75 kcal.", "tag": "Exercise", "color": "#6c5ce7"})
+    elif exercise_burned > 300:
+        recs.append({"icon": "\U0001f4aa", "title": "Great workout!", "text": f"You've burned {exercise_burned} kcal through exercise. Make sure to refuel with protein-rich foods for recovery.", "tag": "Positive", "color": "#00d4aa"})
+
+    # Goal-specific
+    if goal == "Lose" and avg_cal > goal_value * 1.1 and len(history) >= 3:
+        recs.append({"icon": "\U0001f4c9", "title": "Trending above target", "text": f"Your 7-day average ({avg_cal:.0f} kcal) exceeds your goal by {avg_cal - goal_value:.0f} kcal. Try meal prepping to stay consistent.", "tag": "Trend", "color": "#e74c3c"})
+    elif goal == "Gain" and avg_cal < goal_value * 0.9 and len(history) >= 3:
+        recs.append({"icon": "\U0001f4c8", "title": "Eat more to reach your goal", "text": f"Your average ({avg_cal:.0f} kcal) is below target. Add calorie-dense foods like nuts, avocado, or rice.", "tag": "Trend", "color": "#f39c12"})
+
+    # Consistency
+    if len(history) >= 5:
+        on_target = sum(1 for h in history if 0 < h <= goal_value)
+        if on_target / len(history) >= 0.7:
+            recs.append({"icon": "\U0001f525", "title": "Consistency champion!", "text": f"You've been on target {on_target}/{len(history)} days this week. Keep this momentum going!", "tag": "Positive", "color": "#00d4aa"})
+
+    if not recs:
+        recs.append({"icon": "\U0001f31f", "title": "Looking good!", "text": "Keep tracking your meals and exercise. Consistency is the key to reaching your goals.", "tag": "General", "color": "#6c5ce7"})
+
+    return recs
+
+
+def get_chatbot_response(message: str, calorie_status: int, goal_value: int, water_intake: int, water_goal: int, exercise_burned: int, exercises: list, user: dict, foods: list[dict], log_entries: list[dict]) -> str:
+    msg = message.lower().strip()
+    name = user.get("name", "there")
+    remaining = max(0, goal_value - calorie_status + exercise_burned)
+    goal = user.get("goal", "Maintain")
+
+    # Greetings
+    if any(w in msg for w in ["hi", "hello", "hey", "sup"]):
+        return f"Hey {name}! \U0001f44b I'm your nutrition assistant. Ask me about your calories, water, exercise, or food suggestions!"
+
+    # Calorie queries
+    if any(w in msg for w in ["calorie", "eaten", "consumed", "how much", "intake"]):
+        if calorie_status == 0:
+            return f"You haven't logged any food yet today. Your daily goal is **{goal_value} kcal**. Start tracking to stay on top of your nutrition!"
+        return f"You've eaten **{calorie_status} kcal** out of your **{goal_value} kcal** goal. That's **{remaining} kcal** remaining (after accounting for {exercise_burned} kcal burned from exercise)."
+
+    # Remaining
+    if any(w in msg for w in ["remaining", "left", "budget"]):
+        return f"You have **{remaining} kcal** remaining today. {'You\'re doing great \u2014 stay mindful with your next meal!' if remaining > 200 else 'You\'re close to your limit \u2014 opt for lighter options like salad or soup.'}"
+
+    # Water
+    if any(w in msg for w in ["water", "hydrat", "drink", "glass"]):
+        return f"You've had **{water_intake}/{water_goal} glasses** of water today. {'Great hydration! \U0001f4a7' if water_intake >= water_goal else f'Try to drink {water_goal - water_intake} more glasses before the day ends.'}"
+
+    # Exercise
+    if any(w in msg for w in ["exercise", "workout", "burn", "active", "gym"]):
+        if not exercises:
+            return "No exercises logged today. Try adding a 30-min walk (150 kcal), jog (300 kcal), or yoga session (120 kcal) to boost your day!"
+        ex_list = ", ".join(f"{e['name']} (-{e['calories_burned']} kcal)" for e in exercises)
+        return f"Today's exercise: {ex_list}. Total burned: **{exercise_burned} kcal**. {'Amazing effort! \U0001f4aa' if exercise_burned > 200 else 'Every bit counts!'}"
+
+    # Food suggestions
+    if any(w in msg for w in ["suggest", "recommend", "what should i eat", "food idea", "meal idea", "hungry"]):
+        if remaining < 200:
+            return "You're close to your limit. Try: a small fruit (50-80 kcal), green tea (0 kcal), or a handful of cherry tomatoes (25 kcal)."
+        low_cal = [f for f in foods if f["calories"] <= remaining // 2]
+        if low_cal:
+            picks = random.sample(low_cal, min(3, len(low_cal)))
+            items = "\n".join(f"\u2022 **{p['name']}** \u2014 {p['calories']} kcal" for p in picks)
+            return f"Here are some options that fit your budget ({remaining} kcal left):\n{items}"
+        return f"You have {remaining} kcal left. Check the Food Database tab for options that fit your budget."
+
+    # BMI
+    if "bmi" in msg:
+        h = user.get("height", 175)
+        w = user.get("weight", 70)
+        bmi = w / (h / 100) ** 2 if h > 0 else 0
+        cat = "Underweight" if bmi < 18.5 else "Normal" if bmi < 25 else "Overweight" if bmi < 30 else "Obese"
+        return f"Your BMI is **{bmi:.1f}** ({cat}). {'You\'re in a healthy range! \U0001f44d' if cat == 'Normal' else 'Talk to a healthcare professional for personalized advice.'}"
+
+    # Goal
+    if any(w in msg for w in ["goal", "target", "aim"]):
+        return f"Your goal is to **{goal}** weight with a daily target of **{goal_value} kcal**. {'Focus on a calorie deficit through portion control.' if goal == 'Lose' else 'Focus on nutrient-dense, calorie-rich foods.' if goal == 'Gain' else 'Keep a balanced diet to maintain your weight.'}"
+
+    # Today summary
+    if any(w in msg for w in ["summary", "today", "overview", "status"]):
+        entries_count = len(log_entries)
+        return f"**Today's Summary:**\n\u2022 Food: {calorie_status}/{goal_value} kcal ({entries_count} items)\n\u2022 Exercise: -{exercise_burned} kcal\n\u2022 Net remaining: {remaining} kcal\n\u2022 Water: {water_intake}/{water_goal} glasses\n\n{'You\'re on track! \U0001f525' if calorie_status <= goal_value else 'You\'ve exceeded your goal \u2014 consider some exercise.'}"
+
+    # Help
+    if any(w in msg for w in ["help", "what can you", "commands", "options"]):
+        return "I can help with:\n\u2022 **\"How many calories?\"** \u2014 check your intake\n\u2022 **\"What should I eat?\"** \u2014 food suggestions\n\u2022 **\"Water status\"** \u2014 hydration check\n\u2022 **\"Exercise\"** \u2014 today's activity\n\u2022 **\"Summary\"** \u2014 daily overview\n\u2022 **\"BMI\"** \u2014 calculate your BMI\n\u2022 **\"Goal\"** \u2014 your current target"
+
+    # Fallback
+    return f"I'm not sure about that, but I can help with calories, water, exercise, food suggestions, BMI, and daily summaries. Type **\"help\"** to see all options!"
+
+
 def load_dashboard_data(api_base_url: str) -> tuple[list[dict], dict, dict]:
     foods = api_call("GET", "/api/foods", api_base_url).get("foods", [])
     log_data = api_call("GET", "/api/log", api_base_url)
@@ -481,7 +610,9 @@ def show_login_screen() -> None:
                 else:
                     try:
                         api_call("POST", "/api/users", api_base_url, {"name": new_name.strip(), "age": int(new_age), "weight": float(new_weight), "height": float(new_height), "goal": new_goal})
-                        st.success(f"Welcome, {new_name.strip()}! Switch to Sign In.")
+                        api_call("POST", "/api/users/select", api_base_url, {"name": new_name.strip()})
+                        st.session_state["logged_in_user"] = new_name.strip()
+                        st.session_state["api_base_url"] = api_base_url
                         st.rerun()
                     except requests.RequestException as err:
                         st.error(f"Could not create profile: {err}")
@@ -638,8 +769,8 @@ def show_main_dashboard() -> None:
     st.markdown("<div class='theme-divider'></div>", unsafe_allow_html=True)
 
     # Tabs
-    tab_diary, tab_exercise, tab_water, tab_foods, tab_goals, tab_history = st.tabs(
-        ["\U0001f4cb Food Diary", "\U0001f3c3 Exercise", "\U0001f4a7 Water", "\U0001f962 Foods", "\U0001f3af Goals & BMI", "\U0001f4ca Insights"]
+    tab_diary, tab_exercise, tab_water, tab_foods, tab_goals, tab_history, tab_chat = st.tabs(
+        ["\U0001f4cb Food Diary", "\U0001f3c3 Exercise", "\U0001f4a7 Water", "\U0001f962 Foods", "\U0001f3af Goals & BMI", "\U0001f4ca Insights", "\U0001f916 AI Chat"]
     )
 
     # Food Diary
@@ -765,6 +896,13 @@ def show_main_dashboard() -> None:
         render_section_header("\U0001f962", "Food Database", "rgba(108,92,231,0.12)")
         f_left, f_right = st.columns([0.5, 0.5], gap="large")
         with f_left:
+            st.markdown(f"**{len(foods)} foods in database**")
+            if foods:
+                categories = sorted({f.get("category", "General") for f in foods})
+                cat_filter = st.selectbox("Filter by category", ["All"] + categories, key="food_cat_filter")
+                filtered = foods if cat_filter == "All" else [f for f in foods if f.get("category") == cat_filter]
+                st.dataframe(filtered, use_container_width=True, hide_index=True, height=400)
+        with f_right:
             st.markdown("**Add New Food**")
             with st.form("food_form"):
                 food_name = st.text_input("Food name", placeholder="e.g. Char Siu Rice")
@@ -780,13 +918,6 @@ def show_main_dashboard() -> None:
                         st.rerun()
                     except requests.RequestException as err:
                         st.error(f"Error: {err}")
-        with f_right:
-            st.markdown(f"**{len(foods)} foods in database**")
-            if foods:
-                categories = sorted({f.get("category", "General") for f in foods})
-                cat_filter = st.selectbox("Filter by category", ["All"] + categories, key="food_cat_filter")
-                filtered = foods if cat_filter == "All" else [f for f in foods if f.get("category") == cat_filter]
-                st.dataframe(filtered, use_container_width=True, hide_index=True, height=400)
 
     # Goals & BMI
     with tab_goals:
@@ -862,6 +993,69 @@ def show_main_dashboard() -> None:
             </div>""", unsafe_allow_html=True)
         else:
             st.info("No weekly history yet. Log food and reset the day to build history.")
+
+        # Recommendations
+        st.markdown("<div class='theme-divider'></div>", unsafe_allow_html=True)
+        render_section_header("\U0001f4a1", "Personalized Recommendations", "rgba(255,107,53,0.12)")
+        recs = generate_recommendations(calorie_status, goal_value, water_intake, water_goal, exercise_burned, history, user)
+        rec_cols = st.columns(min(len(recs), 3), gap="medium")
+        for i, rec in enumerate(recs):
+            with rec_cols[i % min(len(recs), 3)]:
+                st.markdown(f'<div class="rec-card"><div class="rc-icon">{rec["icon"]}</div><div class="rc-title">{rec["title"]}</div><div class="rc-text">{rec["text"]}</div><span class="rc-tag" style="background:{rec["color"]}22; color:{rec["color"]};">{rec["tag"]}</span></div>', unsafe_allow_html=True)
+
+    # AI Chat
+    with tab_chat:
+        render_section_header("\U0001f916", "Nutrition Assistant", "rgba(0,212,170,0.12)")
+        st.markdown('<div style="color:var(--ink-secondary); font-size:0.82rem; margin-bottom:1rem;">Ask me about your calories, water intake, exercise, food suggestions, BMI, or get a daily summary.</div>', unsafe_allow_html=True)
+
+        if "chat_messages" not in st.session_state:
+            st.session_state["chat_messages"] = [
+                {"role": "bot", "text": f"Hey {logged_in_user}! \U0001f44b I'm your nutrition assistant. Ask me anything about your diet, exercise, or health goals!"}
+            ]
+
+        # Display chat history
+        chat_html = '<div class="chat-container">'
+        for msg in st.session_state["chat_messages"]:
+            cls = "chat-user" if msg["role"] == "user" else "chat-bot"
+            prefix = "" if msg["role"] == "user" else "\U0001f916 "
+            safe = _html.escape(msg["text"]).replace("\n", "<br>")
+            safe = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe)
+            chat_html += f'<div class="chat-msg {cls}">{prefix}{safe}</div>'
+        chat_html += '</div>'
+        st.markdown(chat_html, unsafe_allow_html=True)
+
+        # Quick action buttons
+        qc1, qc2, qc3, qc4 = st.columns(4, gap="small")
+        quick_prompts = [
+            (qc1, "\U0001f525 Calories", "How many calories have I eaten?"),
+            (qc2, "\U0001f4a7 Water", "Water status"),
+            (qc3, "\U0001f35c Suggest food", "What should I eat?"),
+            (qc4, "\U0001f4cb Summary", "Give me today's summary"),
+        ]
+        for col, label, prompt in quick_prompts:
+            with col:
+                if st.button(label, use_container_width=True, key=f"quick_{label}"):
+                    st.session_state["chat_messages"].append({"role": "user", "text": prompt})
+                    reply = get_chatbot_response(prompt, calorie_status, goal_value, water_intake, water_goal, exercise_burned, exercises, user, foods, log_data.get("entries", []))
+                    st.session_state["chat_messages"].append({"role": "bot", "text": reply})
+                    st.rerun()
+
+        # Text input
+        with st.form("chat_form", clear_on_submit=True):
+            user_input = st.text_input("Type your message...", key="chat_input", label_visibility="collapsed", placeholder="Ask me anything about your nutrition...")
+            if st.form_submit_button("Send \U0001f680", use_container_width=True):
+                if user_input.strip():
+                    st.session_state["chat_messages"].append({"role": "user", "text": user_input.strip()})
+                    reply = get_chatbot_response(user_input, calorie_status, goal_value, water_intake, water_goal, exercise_burned, exercises, user, foods, log_data.get("entries", []))
+                    st.session_state["chat_messages"].append({"role": "bot", "text": reply})
+                    st.rerun()
+
+        if len(st.session_state["chat_messages"]) > 1:
+            if st.button("\U0001f5d1\ufe0f Clear chat"):
+                st.session_state["chat_messages"] = [
+                    {"role": "bot", "text": f"Chat cleared! How can I help you, {logged_in_user}?"}
+                ]
+                st.rerun()
 
 
 def main() -> None:

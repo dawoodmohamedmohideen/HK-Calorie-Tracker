@@ -120,7 +120,7 @@ class CalorieTrackerService:
     def list_users(self) -> List[Dict[str, int | str]]:
         return [self._user_payload(user, index=index) for index, user in enumerate(self.users)]
 
-    def add_user(self, name: str, age: int, weight: float, height: float, goal: str, daily_calorie_target: int = 2000) -> None:
+    def add_user(self, name: str, age: int, weight: float, height: float, goal: str, daily_calorie_target: int = 2000) -> Dict[str, int | str]:
         with self._lock:
             if self.user_exists(name):
                 raise ValueError("User already exists")
@@ -133,7 +133,7 @@ class CalorieTrackerService:
             self.meal_labels.append([])
             self.streaks.append(0)
             self.exercises.append([])
-            self.current_user_index = len(self.users) - 1
+            return self._user_payload(new_user, index=len(self.users) - 1)
 
     def select_user(self, name: str) -> None:
         with self._lock:
@@ -353,11 +353,11 @@ def create_user() -> tuple:
         return jsonify({"error": "Age, weight, height, and daily_calorie_target must be numbers"}), 400
 
     try:
-        service.add_user(name, age_int, weight_float, height_float, goal, daily_target_int)
+        created_user = service.add_user(name, age_int, weight_float, height_float, goal, daily_target_int)
     except ValueError as err:
         return jsonify({"error": str(err)}), 409
 
-    return jsonify({"message": "User created", "user": service.get_user()}), 201
+    return jsonify({"message": "User created", "user": created_user}), 201
 
 
 @app.post("/api/users/select")
