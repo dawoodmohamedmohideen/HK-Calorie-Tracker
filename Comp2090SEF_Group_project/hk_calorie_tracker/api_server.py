@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
+import sqlite3
 from threading import Lock
 from typing import Dict, List
 
 from flask import Flask, jsonify, request
 
 from database import FoodDatabase
+from food import HKFood
 from tracker import DailyLog
 from user import User
 
@@ -14,21 +18,358 @@ from user import User
 class CalorieTrackerService:
     def __init__(self) -> None:
         self._lock = Lock()
+        self._state_file = Path(__file__).with_name("tracker_state.db")
+        self._legacy_state_file = Path(__file__).with_name("tracker_state.json")
+        self.users: List[User] = []
+        self.current_user_index = 0
+        self.db = FoodDatabase()
+        self.logs: List[DailyLog] = []
+        self.weekly_history: List[List[int]] = []
+        self.water_intake: List[int] = []
+        self.water_goal: List[int] = []
+        self.meal_labels: List[List[str]] = []
+        self.streaks: List[int] = []
+        self.exercises: List[List[Dict]] = []
+
+        self._initialize_db()
+        if not self._load_state():
+            if self._load_legacy_state():
+                self._save_state()
+            else:
+                self._load_default_state()
+                self._save_state()
+
+    def _initialize_db(self) -> None:
+        with sqlite3.connect(self._state_file) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS app_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS users (
+                    user_index INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    age INTEGER NOT NULL,
+                    weight REAL NOT NULL,
+                    height REAL NOT NULL,
+                    goal TEXT NOT NULL,
+                    daily_calorie_target INTEGER NOT NULL,
+                    daily_calories INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS foods (
+                    position INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    calories INTEGER NOT NULL,
+                    category TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS logs (
+                    user_index INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    food_name TEXT NOT NULL,
+                    calories INTEGER NOT NULL,
+                    category TEXT NOT NULL,
+                    PRIMARY KEY (user_index, position)
+                );
+                CREATE TABLE IF NOT EXISTS weekly_history (
+                    user_index INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    calories INTEGER NOT NULL,
+                    PRIMARY KEY (user_index, position)
+                );
+                CREATE TABLE IF NOT EXISTS water (
+                    user_index INTEGER PRIMARY KEY,
+                    intake INTEGER NOT NULL,
+                    goal INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS meal_labels (
+                    user_index INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    meal TEXT NOT NULL,
+                    PRIMARY KEY (user_index, position)
+                );
+                CREATE TABLE IF NOT EXISTS streaks (
+                    user_index INTEGER PRIMARY KEY,
+                    streak INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS exercises (
+                    user_index INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    calories_burned INTEGER NOT NULL,
+                    duration_min INTEGER NOT NULL,
+                    PRIMARY KEY (user_index, position)
+                );
+                """
+            )
+
+    def _load_default_state(self) -> None:
         self.users = [User("Dawood", 20, 70, 175, "Maintain", daily_calorie_target=2000)]
         self.current_user_index = 0
         self.db = FoodDatabase()
         self.logs = [DailyLog()]
         self.weekly_history = [[0]]
-        # Water tracking: glasses per user per day
-        self.water_intake: List[int] = [0]
-        self.water_goal: List[int] = [8]  # default 8 glasses
-        # Meal categories for log entries
-        self.meal_labels: List[List[str]] = [[]]  # parallel to log entries
-        # Streak tracking: consecutive days logged
-        self.streaks: List[int] = [0]
-        # Exercise tracking: list of {name, calories_burned, duration_min} per user
-        self.exercises: List[List[Dict]] = [[]]
+        self.water_intake = [0]
+        self.water_goal = [8]
+        self.meal_labels = [[]]
+        self.streaks = [0]
+        self.exercises = [[]]
         self._seed_foods()
+
+    def _save_state(self) -> None:
+        with sqlite3.connect(self._state_file) as conn:
+            conn.executescript(
+                """
+                DELETE FROM app_meta;
+                DELETE FROM users;
+                DELETE FROM foods;
+                DELETE FROM logs;
+                DELETE FROM weekly_history;
+                DELETE FROM water;
+                DELETE FROM meal_labels;
+                DELETE FROM streaks;
+                DELETE FROM exercises;
+                """
+            )
+            conn.execute(
+                "INSERT INTO app_meta (key, value) VALUES (?, ?)",
+                ("current_user_index", str(self.current_user_index)),
+            )
+
+            for user_index, user in enumerate(self.users):
+                conn.execute(
+                    """
+                    INSERT INTO users (user_index, name, age, weight, height, goal, daily_calorie_target, daily_calories)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_index,
+                        user.name,
+                        int(user.age),
+                        float(user.weight),
+                        float(user.height),
+                        user.goal,
+                        int(user.get_daily_calorie_target()),
+                        int(user.get_daily_calories()),
+                    ),
+                )
+
+            for position, food in enumerate(self.db.food_list):
+                conn.execute(
+                    "INSERT INTO foods (position, name, calories, category) VALUES (?, ?, ?, ?)",
+                    (position, food.name, int(food.calories), str(getattr(food, "category", "General"))),
+                )
+
+            for user_index, daily_log in enumerate(self.logs):
+                for position, food in enumerate(daily_log.log):
+                    conn.execute(
+                        "INSERT INTO logs (user_index, position, food_name, calories, category) VALUES (?, ?, ?, ?, ?)",
+                        (user_index, position, food.name, int(food.calories), str(getattr(food, "category", "General"))),
+                    )
+
+            for user_index, history in enumerate(self.weekly_history):
+                for position, calories in enumerate(history):
+                    conn.execute(
+                        "INSERT INTO weekly_history (user_index, position, calories) VALUES (?, ?, ?)",
+                        (user_index, position, int(calories)),
+                    )
+
+            for user_index, intake in enumerate(self.water_intake):
+                conn.execute(
+                    "INSERT INTO water (user_index, intake, goal) VALUES (?, ?, ?)",
+                    (user_index, int(intake), int(self.water_goal[user_index])),
+                )
+
+            for user_index, labels in enumerate(self.meal_labels):
+                for position, meal in enumerate(labels):
+                    conn.execute(
+                        "INSERT INTO meal_labels (user_index, position, meal) VALUES (?, ?, ?)",
+                        (user_index, position, str(meal)),
+                    )
+
+            for user_index, streak in enumerate(self.streaks):
+                conn.execute(
+                    "INSERT INTO streaks (user_index, streak) VALUES (?, ?)",
+                    (user_index, int(streak)),
+                )
+
+            for user_index, exercise_list in enumerate(self.exercises):
+                for position, exercise in enumerate(exercise_list):
+                    conn.execute(
+                        """
+                        INSERT INTO exercises (user_index, position, name, calories_burned, duration_min)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            user_index,
+                            position,
+                            str(exercise.get("name", "Exercise")),
+                            int(exercise.get("calories_burned", 0)),
+                            int(exercise.get("duration_min", 0)),
+                        ),
+                    )
+
+    def _load_state(self) -> bool:
+        if not self._state_file.exists() or self._state_file.stat().st_size == 0:
+            return False
+
+        try:
+            with sqlite3.connect(self._state_file) as conn:
+                conn.row_factory = sqlite3.Row
+                user_rows = conn.execute("SELECT * FROM users ORDER BY user_index").fetchall()
+                if not user_rows:
+                    return False
+
+                self.db = FoodDatabase()
+                food_rows = conn.execute("SELECT name, calories, category FROM foods ORDER BY position").fetchall()
+                for food_row in food_rows:
+                    self.db.add_food(food_row["name"], int(food_row["calories"]), food_row["category"])
+
+                self.users = []
+                for row in user_rows:
+                    user = User(
+                        row["name"],
+                        int(row["age"]),
+                        float(row["weight"]),
+                        float(row["height"]),
+                        row["goal"],
+                        int(row["daily_calorie_target"]),
+                    )
+                    user.add_calories(int(row["daily_calories"]))
+                    self.users.append(user)
+
+                user_count = len(self.users)
+                self.logs = [DailyLog() for _ in range(user_count)]
+                for row in conn.execute("SELECT * FROM logs ORDER BY user_index, position"):
+                    self.logs[int(row["user_index"])].add_entry(
+                        HKFood(row["food_name"], int(row["calories"]), row["category"])
+                    )
+
+                self.weekly_history = [[] for _ in range(user_count)]
+                for row in conn.execute("SELECT * FROM weekly_history ORDER BY user_index, position"):
+                    self.weekly_history[int(row["user_index"])].append(int(row["calories"]))
+
+                self.water_intake = [0 for _ in range(user_count)]
+                self.water_goal = [8 for _ in range(user_count)]
+                for row in conn.execute("SELECT * FROM water ORDER BY user_index"):
+                    index = int(row["user_index"])
+                    self.water_intake[index] = int(row["intake"])
+                    self.water_goal[index] = int(row["goal"])
+
+                self.meal_labels = [[] for _ in range(user_count)]
+                for row in conn.execute("SELECT * FROM meal_labels ORDER BY user_index, position"):
+                    self.meal_labels[int(row["user_index"])].append(row["meal"])
+
+                self.streaks = [0 for _ in range(user_count)]
+                for row in conn.execute("SELECT * FROM streaks ORDER BY user_index"):
+                    self.streaks[int(row["user_index"])] = int(row["streak"])
+
+                self.exercises = [[] for _ in range(user_count)]
+                for row in conn.execute("SELECT * FROM exercises ORDER BY user_index, position"):
+                    self.exercises[int(row["user_index"])].append(
+                        {
+                            "name": row["name"],
+                            "calories_burned": int(row["calories_burned"]),
+                            "duration_min": int(row["duration_min"]),
+                        }
+                    )
+
+                for history in self.weekly_history:
+                    if not history:
+                        history.append(0)
+
+                meta_row = conn.execute(
+                    "SELECT value FROM app_meta WHERE key = ?",
+                    ("current_user_index",),
+                ).fetchone()
+                loaded_index = int(meta_row["value"]) if meta_row else 0
+                self.current_user_index = min(max(0, loaded_index), user_count - 1)
+            return True
+        except (OSError, ValueError, TypeError, sqlite3.Error):
+            return False
+
+    def _load_legacy_state(self) -> bool:
+        if not self._legacy_state_file.exists():
+            return False
+
+        try:
+            payload = json.loads(self._legacy_state_file.read_text(encoding="utf-8"))
+            users_payload = payload.get("users", [])
+            if not users_payload:
+                return False
+
+            self.db = FoodDatabase()
+            for food_payload in payload.get("foods", []):
+                self.db.add_food(
+                    str(food_payload.get("name", "")).strip(),
+                    int(food_payload.get("calories", 0)),
+                    str(food_payload.get("category", "General")).strip() or "General",
+                )
+
+            self.users = []
+            for user_payload in users_payload:
+                user = User(
+                    str(user_payload.get("name", "User")).strip() or "User",
+                    int(user_payload.get("age", 20)),
+                    float(user_payload.get("weight", 70)),
+                    float(user_payload.get("height", 175)),
+                    str(user_payload.get("goal", "Maintain")).strip() or "Maintain",
+                    int(user_payload.get("daily_calorie_target", 2000)),
+                )
+                user.add_calories(int(user_payload.get("daily_calories", 0)))
+                self.users.append(user)
+
+            self.logs = []
+            for log_payload in payload.get("logs", []):
+                daily_log = DailyLog()
+                for food_payload in log_payload:
+                    daily_log.add_entry(
+                        HKFood(
+                            str(food_payload.get("name", "Unknown")),
+                            int(food_payload.get("calories", 0)),
+                            str(food_payload.get("category", "General")),
+                        )
+                    )
+                self.logs.append(daily_log)
+
+            user_count = len(self.users)
+            self.weekly_history = [list(map(int, history)) for history in payload.get("weekly_history", [])[:user_count]]
+            self.water_intake = [int(value) for value in payload.get("water_intake", [])[:user_count]]
+            self.water_goal = [int(value) for value in payload.get("water_goal", [])[:user_count]]
+            self.meal_labels = [list(map(str, labels)) for labels in payload.get("meal_labels", [])[:user_count]]
+            self.streaks = [int(value) for value in payload.get("streaks", [])[:user_count]]
+            self.exercises = [
+                [
+                    {
+                        "name": str(exercise.get("name", "Exercise")),
+                        "calories_burned": int(exercise.get("calories_burned", 0)),
+                        "duration_min": int(exercise.get("duration_min", 0)),
+                    }
+                    for exercise in exercise_list
+                ]
+                for exercise_list in payload.get("exercises", [])[:user_count]
+            ]
+
+            while len(self.logs) < user_count:
+                self.logs.append(DailyLog())
+            while len(self.weekly_history) < user_count:
+                self.weekly_history.append([0])
+            while len(self.water_intake) < user_count:
+                self.water_intake.append(0)
+            while len(self.water_goal) < user_count:
+                self.water_goal.append(8)
+            while len(self.meal_labels) < user_count:
+                self.meal_labels.append([])
+            while len(self.streaks) < user_count:
+                self.streaks.append(0)
+            while len(self.exercises) < user_count:
+                self.exercises.append([])
+
+            loaded_index = int(payload.get("current_user_index", 0))
+            self.current_user_index = min(max(0, loaded_index), user_count - 1)
+            return True
+        except (OSError, ValueError, TypeError, json.JSONDecodeError, KeyError):
+            return False
 
     def current_user(self) -> User:
         return self.users[self.current_user_index]
@@ -133,6 +474,7 @@ class CalorieTrackerService:
             self.meal_labels.append([])
             self.streaks.append(0)
             self.exercises.append([])
+            self._save_state()
             return self._user_payload(new_user, index=len(self.users) - 1)
 
     def select_user(self, name: str) -> None:
@@ -140,6 +482,7 @@ class CalorieTrackerService:
             for index, user in enumerate(self.users):
                 if user.name.lower() == name.lower():
                     self.current_user_index = index
+                    self._save_state()
                     return
             raise ValueError("User not found")
 
@@ -164,6 +507,7 @@ class CalorieTrackerService:
                         self.current_user_index -= 1
                     if self.current_user_index >= len(self.users):
                         self.current_user_index = len(self.users) - 1
+                    self._save_state()
                     return
             raise ValueError("User not found")
 
@@ -173,6 +517,7 @@ class CalorieTrackerService:
     def add_food(self, name: str, calories: int, category: str = "General") -> None:
         with self._lock:
             self.db.add_food(name, calories, category)
+            self._save_state()
 
     def log_food(self, food_name: str, quantity: int = 1, meal: str = "General") -> Dict[str, int | str]:
         with self._lock:
@@ -187,7 +532,23 @@ class CalorieTrackerService:
             # Update streak: if first log of the day, increment streak
             if len(self.current_log().log) == quantity:
                 self.streaks[self.current_user_index] += 1
+            self._save_state()
             return self._food_payload(food)
+
+    def remove_log_entry(self, food_name: str) -> bool:
+        with self._lock:
+            log_list = self.current_log().log
+            meal_labels = self.meal_labels[self.current_user_index]
+            for index, food in enumerate(log_list):
+                if food.name == food_name:
+                    self.current_user().add_calories(-food.calories)
+                    log_list.pop(index)
+                    if index < len(meal_labels):
+                        meal_labels.pop(index)
+                    self.weekly_history[self.current_user_index][-1] = self.current_log().total_calories()
+                    self._save_state()
+                    return True
+            return False
 
     def get_log(self) -> Dict[str, object]:
         # Group entries by food name + meal for cleaner display
@@ -219,11 +580,13 @@ class CalorieTrackerService:
     def add_water(self, glasses: int = 1) -> int:
         with self._lock:
             self.water_intake[self.current_user_index] += glasses
+            self._save_state()
             return self.water_intake[self.current_user_index]
 
     def set_water_goal(self, goal: int) -> None:
         with self._lock:
             self.water_goal[self.current_user_index] = max(1, goal)
+            self._save_state()
 
     def reset_day(self) -> None:
         with self._lock:
@@ -239,6 +602,7 @@ class CalorieTrackerService:
             self.water_intake[self.current_user_index] = 0
             self.meal_labels[self.current_user_index] = []
             self.exercises[self.current_user_index] = []
+            self._save_state()
 
     def get_user(self) -> Dict[str, int | str]:
         return self._user_payload(self.current_user())
@@ -253,51 +617,92 @@ class CalorieTrackerService:
             user.goal = str(payload.get("goal", user.goal)).strip() or user.goal
             daily_target = payload.get("daily_calorie_target", user.get_daily_calorie_target())
             user.set_daily_calorie_target(int(daily_target))
+            self._save_state()
             return self.get_user()
+
+    def add_exercise(self, name: str, calories_burned: int, duration: int) -> List[Dict[str, int | str]]:
+        with self._lock:
+            self.exercises[self.current_user_index].append(
+                {"name": name, "calories_burned": calories_burned, "duration_min": duration}
+            )
+            self._save_state()
+            return self.exercises[self.current_user_index]
+
+    def delete_exercise(self, index: int) -> Dict[str, int | str] | None:
+        with self._lock:
+            ex_list = self.exercises[self.current_user_index]
+            if 0 <= index < len(ex_list):
+                removed = ex_list.pop(index)
+                self._save_state()
+                return removed
+            return None
 
 
 app = Flask(__name__)
 service = CalorieTrackerService()
 
 
+def request_payload() -> dict:
+    return request.get_json(silent=True) or {}
+
+
+def respond(payload: dict, status: int = 200) -> tuple:
+    return jsonify(payload), status
+
+
+def fail(message: str, status: int = 400) -> tuple:
+    return respond({"error": message}, status)
+
+
+def text_field(payload: dict, field: str, default: str = "") -> str:
+    return str(payload.get(field, default)).strip() or default
+
+
+def require_text(payload: dict, field: str) -> str:
+    value = text_field(payload, field)
+    if not value:
+        raise ValueError(f"Field '{field}' is required")
+    return value
+
+
 @app.get("/health")
 def health() -> tuple:
-    return jsonify({"status": "ok"}), 200
+    return respond({"status": "ok"})
 
 
 @app.get("/api/foods")
 def get_foods() -> tuple:
-    return jsonify({"foods": service.list_foods()}), 200
+    return respond({"foods": service.list_foods()})
 
 
 @app.post("/api/foods")
 def create_food() -> tuple:
-    payload = request.get_json(silent=True) or {}
-    name = str(payload.get("name", "")).strip()
+    payload = request_payload()
+    name = text_field(payload, "name")
     calories = payload.get("calories")
-    category = str(payload.get("category", "General")).strip() or "General"
+    category = text_field(payload, "category", "General")
 
     if not name:
-        return jsonify({"error": "Field 'name' is required"}), 400
+        return fail("Field 'name' is required")
 
     try:
         calories_int = int(calories)
         if calories_int <= 0:
             raise ValueError
     except (TypeError, ValueError):
-        return jsonify({"error": "Field 'calories' must be a positive integer"}), 400
+        return fail("Field 'calories' must be a positive integer")
 
     service.add_food(name, calories_int, category)
-    return jsonify({"message": "Food added", "food": {"name": name, "calories": calories_int, "category": category}}), 201
+    return respond({"message": "Food added", "food": {"name": name, "calories": calories_int, "category": category}}, 201)
 
 
 @app.post("/api/log")
 def add_log_entry() -> tuple:
-    payload = request.get_json(silent=True) or {}
-    food_name = str(payload.get("food_name", "")).strip()
-
-    if not food_name:
-        return jsonify({"error": "Field 'food_name' is required"}), 400
+    payload = request_payload()
+    try:
+        food_name = require_text(payload, "food_name")
+    except ValueError as err:
+        return fail(str(err))
 
     quantity = payload.get("quantity", 1)
     try:
@@ -310,39 +715,67 @@ def add_log_entry() -> tuple:
     try:
         entry = service.log_food(food_name, quantity, meal)
     except ValueError as err:
-        return jsonify({"error": str(err)}), 404
+        return fail(str(err), 404)
 
-    return jsonify({"message": "Food logged", "entry": entry, "daily_calories": service.get_user()["daily_calories"]}), 201
+    return respond({"message": "Food logged", "entry": entry, "daily_calories": service.get_user()["daily_calories"]}, 201)
 
 
 @app.get("/api/log")
 def get_log() -> tuple:
-    return jsonify(service.get_log()), 200
+    return respond(service.get_log())
 
 
 @app.delete("/api/log")
 def reset_log() -> tuple:
     service.reset_day()
-    return jsonify({"message": "Daily log reset"}), 200
+    return respond({"message": "Daily log reset"})
+
+
+@app.delete("/api/log/entry")
+def delete_log_entry() -> tuple:
+    payload = request_payload()
+    try:
+        food_name = require_text(payload, "food_name")
+    except ValueError as err:
+        return fail(str(err))
+    if service.remove_log_entry(food_name):
+        return respond({"message": f"Removed one '{food_name}'"})
+    return fail(f"'{food_name}' not found in log", 404)
+
+
+@app.delete("/api/exercise/entry")
+def delete_exercise_entry() -> tuple:
+    payload = request_payload()
+    index = payload.get("index")
+    if index is None:
+        return fail("Field 'index' is required")
+    try:
+        index = int(index)
+    except (TypeError, ValueError):
+        return fail("'index' must be an integer")
+    removed = service.delete_exercise(index)
+    if removed is not None:
+        return respond({"message": f"Removed '{removed['name']}'"})
+    return fail("Index out of range", 404)
 
 
 @app.get("/api/users")
 def get_users() -> tuple:
-    return jsonify({"users": service.list_users()}), 200
+    return respond({"users": service.list_users()})
 
 
 @app.post("/api/users")
 def create_user() -> tuple:
-    payload = request.get_json(silent=True) or {}
-    name = str(payload.get("name", "")).strip()
+    payload = request_payload()
+    name = text_field(payload, "name")
     age = payload.get("age")
     weight = payload.get("weight")
     height = payload.get("height")
-    goal = str(payload.get("goal", "Maintain")).strip() or "Maintain"
+    goal = text_field(payload, "goal", "Maintain")
     daily_target = payload.get("daily_calorie_target", 2000)
 
     if not name:
-        return jsonify({"error": "Field 'name' is required"}), 400
+        return fail("Field 'name' is required")
 
     try:
         age_int = int(age)
@@ -350,113 +783,111 @@ def create_user() -> tuple:
         height_float = float(height)
         daily_target_int = int(daily_target)
     except (TypeError, ValueError):
-        return jsonify({"error": "Age, weight, height, and daily_calorie_target must be numbers"}), 400
+        return fail("Age, weight, height, and daily_calorie_target must be numbers")
 
     try:
         created_user = service.add_user(name, age_int, weight_float, height_float, goal, daily_target_int)
     except ValueError as err:
-        return jsonify({"error": str(err)}), 409
+        return fail(str(err), 409)
 
-    return jsonify({"message": "User created", "user": created_user}), 201
+    return respond({"message": "User created", "user": created_user}, 201)
 
 
 @app.post("/api/users/select")
 def select_user() -> tuple:
-    payload = request.get_json(silent=True) or {}
-    name = str(payload.get("name", "")).strip()
-
-    if not name:
-        return jsonify({"error": "Field 'name' is required"}), 400
+    payload = request_payload()
+    try:
+        name = require_text(payload, "name")
+    except ValueError as err:
+        return fail(str(err))
 
     try:
         service.select_user(name)
     except ValueError as err:
-        return jsonify({"error": str(err)}), 404
+        return fail(str(err), 404)
 
-    return jsonify({"message": "User selected", "user": service.get_user()}), 200
+    return respond({"message": "User selected", "user": service.get_user()})
 
 
 @app.delete("/api/users")
 def delete_user_endpoint() -> tuple:
-    payload = request.get_json(silent=True) or {}
-    name = str(payload.get("name", "")).strip()
-
-    if not name:
-        return jsonify({"error": "Field 'name' is required"}), 400
+    payload = request_payload()
+    try:
+        name = require_text(payload, "name")
+    except ValueError as err:
+        return fail(str(err))
 
     try:
         service.delete_user(name)
     except ValueError as err:
         status = 400 if "last user" in str(err) else 404
-        return jsonify({"error": str(err)}), status
+        return fail(str(err), status)
 
-    return jsonify({"message": "User deleted"}), 200
+    return respond({"message": "User deleted"})
 
 
 @app.get("/api/user")
 def get_user() -> tuple:
-    return jsonify({"user": service.get_user()}), 200
+    return respond({"user": service.get_user()})
 
 
 @app.put("/api/user")
 def update_user() -> tuple:
-    payload = request.get_json(silent=True) or {}
+    payload = request_payload()
 
     try:
         user = service.update_user(payload)
     except (TypeError, ValueError):
-        return jsonify({"error": "Invalid user payload"}), 400
+        return fail("Invalid user payload")
 
-    return jsonify({"message": "User updated", "user": user}), 200
+    return respond({"message": "User updated", "user": user})
 
 
 @app.post("/api/water")
 def add_water() -> tuple:
-    payload = request.get_json(silent=True) or {}
+    payload = request_payload()
     glasses = payload.get("glasses", 1)
     try:
         glasses = max(1, int(glasses))
     except (TypeError, ValueError):
         glasses = 1
     total = service.add_water(glasses)
-    return jsonify({"message": f"Added {glasses} glass(es)", "water_intake": total}), 200
+    return respond({"message": f"Added {glasses} glass(es)", "water_intake": total})
 
 
 @app.put("/api/water/goal")
 def set_water_goal() -> tuple:
-    payload = request.get_json(silent=True) or {}
+    payload = request_payload()
     goal = payload.get("goal", 8)
     try:
         goal = max(1, int(goal))
     except (TypeError, ValueError):
         goal = 8
     service.set_water_goal(goal)
-    return jsonify({"message": "Water goal updated", "water_goal": goal}), 200
+    return respond({"message": "Water goal updated", "water_goal": goal})
 
 
 @app.post("/api/exercise")
 def add_exercise() -> tuple:
-    payload = request.get_json(silent=True) or {}
-    name = str(payload.get("name", "")).strip()
-    if not name:
-        return jsonify({"error": "Field 'name' is required"}), 400
+    payload = request_payload()
+    try:
+        name = require_text(payload, "name")
+    except ValueError as err:
+        return fail(str(err))
     try:
         calories_burned = max(0, int(payload.get("calories_burned", 0)))
         duration = max(1, int(payload.get("duration_min", 30)))
     except (TypeError, ValueError):
-        return jsonify({"error": "calories_burned and duration_min must be integers"}), 400
-    with service._lock:
-        service.exercises[service.current_user_index].append(
-            {"name": name, "calories_burned": calories_burned, "duration_min": duration}
-        )
-    return jsonify({"message": "Exercise logged", "exercises": service.exercises[service.current_user_index]}), 201
+        return fail("calories_burned and duration_min must be integers")
+    exercises = service.add_exercise(name, calories_burned, duration)
+    return respond({"message": "Exercise logged", "exercises": exercises}, 201)
 
 
 @app.get("/api/exercise")
 def get_exercises() -> tuple:
     exercises = service.exercises[service.current_user_index]
     total_burned = sum(e.get("calories_burned", 0) for e in exercises)
-    return jsonify({"exercises": exercises, "total_burned": total_burned}), 200
+    return respond({"exercises": exercises, "total_burned": total_burned})
 
 
 if __name__ == "__main__":

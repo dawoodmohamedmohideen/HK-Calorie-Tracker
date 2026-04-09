@@ -1,12 +1,14 @@
+from collection_adt import ItemCollectionADT
 from food import HKFood
+
 
 class FoodDatabase:
     def __init__(self):
-        self.food_list = []
+        self.food_list = ItemCollectionADT()
 
     def add_food(self, name, calories, category="General"):
         food = HKFood(name, calories, category)
-        self.food_list.append(food)
+        self.food_list.add(food)
 
     def show_foods(self):
         for food in self.food_list:

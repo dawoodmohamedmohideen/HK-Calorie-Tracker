@@ -1,73 +1,126 @@
 # HK Calorie Tracker
 
-HK Calorie Tracker is a modular Python project for recording daily calorie intake based on common Hong Kong food items.
+HK Calorie Tracker is a Hong Kong-focused calorie tracking app built with Python, Flask, and Streamlit. It keeps the original object-oriented project structure, adds a web API, and provides a richer dashboard for food logging, exercise tracking, hydration, insights, and a local AI health coach.
 
-This repository now supports:
-- a CLI application (original flow),
-- a Flask backend API,
-- and a Streamlit frontend that sends requests to the Flask backend.
+## What It Includes
 
-## Architecture
+- Multi-profile calorie tracking
+- Hong Kong food database with custom food creation
+- Food diary with meal labels and per-entry delete actions
+- Exercise logging with calorie burn tracking
+- Water intake tracking with configurable daily goal
+- Goal and BMI tools
+- Weekly insights and recommendations
+- Local AI health coach for calories, protein, recovery, meal ideas, and summaries
+- Daily summary export as a text file
+- Weekly history export as CSV
+- Automatic local SQLite persistence across backend restarts
+- Object-oriented design with encapsulation, inheritance, and polymorphism across the core tracker models
+- ADT-backed food and log collections through `ItemCollectionADT` for safer reusable item storage
+- Refactored backend request handling and frontend API actions to reduce duplication and improve maintainability
+- Updated launcher scripts that correctly forward extra command-line arguments such as custom ports
 
-Core logic (existing modules):
-- `food.py`: `Food` entity (name, calories)
-- `database.py`: `FoodDatabase` for storing and searching foods
-- `tracker.py`: `DailyLog` for consumed food entries and total calorie calculation
-- `user.py`: `User` profile and daily calorie count
-- `main.py`: CLI entrypoint and menu-driven flow
+## Project Structure
 
-Web integration (added):
-- `api_server.py`: Flask API wrapper around existing logic
-- `streamlit_app.py`: Streamlit UI consuming Flask endpoints via HTTP
+Core modules:
+- `food.py`: food entity model with inheritance and polymorphism through `HKFood(Food)`
+- `database.py`: food database and lookup logic using the ADT-backed `food_list`
+- `tracker.py`: daily food logging and calorie totals using the ADT-backed `log`
+- `user.py`: user profile, targets, and tracking state with encapsulated calorie tracking fields
+- `main.py`: original CLI entry point
+- `collection_adt.py`: reusable `ItemCollectionADT` used by the tracker and database layers
+
+Web app modules:
+- `api_server.py`: Flask API for the tracker with shared request and response helpers to reduce repeated endpoint logic
+- `streamlit_app.py`: Streamlit dashboard UI with shared API action handling for success, error, and rerun flow
+- `run_backend.sh` / `run_frontend.sh`: Unix launch scripts with forwarded extra CLI arguments
+- `run_backend.ps1` / `run_frontend.ps1`: Windows launch scripts with forwarded extra CLI arguments
 
 ## Flask API Endpoints
 
-- `GET /health` - service health check
-- `GET /api/foods` - list foods in database
-- `POST /api/foods` - add a food (`name`, `calories`)
-- `POST /api/log` - add food to daily log (`food_name`)
-- `GET /api/log` - get daily log entries and totals
-- `DELETE /api/log` - reset current day log and calories
-- `GET /api/user` - fetch current user profile
-- `PUT /api/user` - update user profile fields
+- `GET /health`: service health check
+- `GET /api/foods`: list all foods
+- `POST /api/foods`: add a custom food
+- `GET /api/log`: get current food log and totals
+- `POST /api/log`: log a food entry
+- `DELETE /api/log`: reset the current day
+- `DELETE /api/log/entry`: remove one logged food entry
+- `GET /api/user`: get active user profile
+- `PUT /api/user`: update active user profile
+- `GET /api/users`: list all profiles
+- `POST /api/users`: create a profile
+- `POST /api/users/select`: switch active profile
+- `DELETE /api/users`: delete a profile
+- `POST /api/exercise`: log exercise
+- `DELETE /api/exercise/entry`: delete exercise entry
+- `POST /api/water`: log water intake
+- `PUT /api/water/goal`: update water goal
 
 ## Setup
 
-1. Create and activate a Python virtual environment.
-2. Install dependencies:
+1. Open a terminal in this folder.
+2. Create a virtual environment.
+3. Activate it.
+4. Install dependencies.
 
-```bash
+Windows:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-## Run
+macOS / Linux:
 
-Open two terminals in this folder.
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-Terminal 1 (Flask backend):
+## Run The App
+
+Start the backend and frontend in separate terminals from this folder.
+
+Windows:
+
+```powershell
+.\run_backend.ps1
+.\run_frontend.ps1
+```
+
+macOS / Linux:
 
 ```bash
 ./run_backend.sh
-```
-
-Terminal 2 (Streamlit frontend):
-
-```bash
 ./run_frontend.sh
 ```
 
-Or run manually:
+Default URLs:
+- Backend: `http://127.0.0.1:5050`
+- Frontend: Streamlit will show the port in the terminal when it starts
 
-```bash
-python3 api_server.py
-streamlit run streamlit_app.py
-```
+## Using The App
+
+- Sign in or create a profile from the login screen
+- Use the sidebar to switch, create, edit, or delete profiles
+- Add custom foods from the sidebar `Add Food` section
+- Log meals, exercise, and water from the dashboard tabs
+- Use the quick-log food search to find foods faster before adding them
+- Review weekly trends and recommendations in `Insights`
+- Use `AI Chat` for local health and fitness guidance
+- Use `Download Daily Summary` to export the current day as a text file
+- Use `Download Weekly History CSV` in `Insights` to export recent calorie history
 
 ## Notes
 
-- Data is stored in memory, so restarting Flask resets foods/logs to initial state.
-- The frontend default backend URL is `http://127.0.0.1:5050` and can be changed from the sidebar.
-- Backend port can be overridden with `HK_TRACKER_API_PORT`.
+- App state is saved locally in `tracker_state.db`, so profiles, logs, water, exercise, and custom foods survive backend restarts
+- If an older `tracker_state.json` exists, the backend can migrate that legacy state into SQLite automatically
+- The frontend connects to `http://127.0.0.1:5050` by default, but the API URL can be changed from the sidebar
+- The backend port can be overridden with `HK_TRACKER_API_PORT`
+- The AI coach currently runs in local mode and does not require a third-party API key
+- During debugging, the main flows were rechecked after the refactor and ADT changes, including profile creation, food logging, water tracking, exercise logging, and cleanup
 
 ## Team
 

@@ -1,9 +1,12 @@
+from collection_adt import ItemCollectionADT
+
+
 class DailyLog:
     def __init__(self):
-        self.log = []
+        self.log = ItemCollectionADT()
 
     def add_entry(self, food):
-        self.log.append(food)
+        self.log.add(food)
 
     def total_calories(self):
         return sum(food.calories for food in self.log)

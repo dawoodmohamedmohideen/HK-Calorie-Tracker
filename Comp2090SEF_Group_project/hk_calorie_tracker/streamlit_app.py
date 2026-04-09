@@ -11,6 +11,10 @@ import math
 import os
 import random
 import re
+from typing import Any, Callable
+
+import altair as alt
+import pandas as pd
 import requests
 import streamlit as st
 
@@ -112,6 +116,27 @@ def inject_styles() -> None:
             .stat-card .stat-icon { font-size: 1.5rem; margin-bottom: 0.5rem; display: inline-block; }
             .stat-card .stat-label { color: var(--muted); font-size: 0.72rem; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 0.2rem; }
             .stat-card .stat-value { font-family: 'Inter', sans-serif; font-size: 1.5rem; font-weight: 800; color: var(--ink); letter-spacing: -0.02em; }
+
+            .status-panel {
+                background: linear-gradient(145deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+                border: 1px solid var(--border); border-radius: var(--radius);
+                padding: 0.9rem; margin: 0.8rem 0 1rem;
+            }
+            .status-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; }
+            .status-chip {
+                background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+                border-radius: 12px; padding: 0.7rem 0.8rem; min-height: 84px;
+            }
+            .status-top {
+                display: flex; align-items: center; justify-content: space-between;
+                gap: 0.5rem; margin-bottom: 0.35rem;
+            }
+            .status-name {
+                color: var(--muted); font-size: 0.68rem; font-weight: 600;
+                letter-spacing: 0.08em; text-transform: uppercase;
+            }
+            .status-value { color: var(--ink); font-size: 1rem; font-weight: 700; line-height: 1.2; }
+            .status-detail { color: var(--ink-secondary); font-size: 0.74rem; line-height: 1.4; }
 
             .progress-container {
                 background: linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
@@ -305,6 +330,29 @@ def api_call(method: str, path: str, base_url: str, payload: dict | None = None)
     return response.json()
 
 
+def run_api_action(
+    action: Callable[[], Any],
+    *,
+    success_message: str | None = None,
+    error_prefix: str = "Error",
+    on_success: Callable[[Any], None] | None = None,
+    rerun: bool = True,
+) -> Any | None:
+    try:
+        result = action()
+    except requests.RequestException as err:
+        st.error(f"{error_prefix}: {err}")
+        return None
+
+    if on_success is not None:
+        on_success(result)
+    if success_message:
+        st.success(success_message)
+    if rerun:
+        st.rerun()
+    return result
+
+
 def render_stat_card(label: str, value: str, icon: str = "") -> None:
     icon_html = f'<div class="stat-icon">{icon}</div>' if icon else ""
     st.markdown(f'<div class="stat-card">{icon_html}<div class="stat-label">{label}</div><div class="stat-value">{value}</div></div>', unsafe_allow_html=True)
@@ -397,6 +445,52 @@ def render_motivation_banner() -> None:
     </div>""", unsafe_allow_html=True)
 
 
+def build_daily_summary_text(user: dict, log_data: dict, goal_value: int, water_intake: int, water_goal: int, exercise_burned: int, exercises: list[dict]) -> str:
+    entries = log_data.get("entries", [])
+    lines = [
+        f"HK Calorie Tracker Daily Summary - {datetime.date.today().isoformat()}",
+        "",
+        f"Profile: {user.get('name', 'Unknown')}",
+        f"Goal: {user.get('goal', 'Maintain')}",
+        f"Calories: {log_data.get('total_calories', 0)} / {goal_value} kcal",
+        f"Exercise burned: {exercise_burned} kcal",
+        f"Water: {water_intake} / {water_goal} glasses",
+        "",
+        "Meals logged:",
+    ]
+
+    if entries:
+        for entry in entries:
+            lines.append(
+                f"- {entry.get('meal', 'General')}: {entry.get('food_name', 'Unknown')} x{entry.get('quantity', 1)} ({entry.get('total_calories', 0)} kcal)"
+            )
+    else:
+        lines.append("- No food logged today")
+
+    lines.extend(["", "Exercises logged:"])
+    if exercises:
+        for exercise in exercises:
+            lines.append(
+                f"- {exercise.get('name', 'Exercise')} for {exercise.get('duration_min', 0)} min ({exercise.get('calories_burned', 0)} kcal)"
+            )
+    else:
+        lines.append("- No exercise logged today")
+
+    return "\n".join(lines)
+
+
+def build_weekly_history_csv(history: list[int], goal_value: int) -> str:
+    day_labels = [
+        (datetime.date.today() - datetime.timedelta(days=len(history) - 1 - index)).isoformat()
+        for index in range(len(history))
+    ]
+    history_df = pd.DataFrame({"date": day_labels, "calories": history})
+    history_df["status"] = history_df["calories"].apply(
+        lambda calories: "Over" if calories > goal_value else ("On Track" if calories > 0 else "Rest")
+    )
+    return history_df.to_csv(index=False)
+
+
 def generate_recommendations(calorie_status: int, goal_value: int, water_intake: int, water_goal: int, exercise_burned: int, history: list[int], user: dict) -> list[dict]:
     recs = []
     goal = user.get("goal", "Maintain")
@@ -476,6 +570,31 @@ def get_chatbot_response(message: str, calorie_status: int, goal_value: int, wat
         ex_list = ", ".join(f"{e['name']} (-{e['calories_burned']} kcal)" for e in exercises)
         return f"Today's exercise: {ex_list}. Total burned: **{exercise_burned} kcal**. {'Amazing effort! \U0001f4aa' if exercise_burned > 200 else 'Every bit counts!'}"
 
+    # Protein and macros
+    if any(w in msg for w in ["protein", "macro", "macros", "carb", "fat intake"]):
+        protein_target = max(60, int(user.get("weight", 70) * 1.6))
+        return f"For general fitness, a solid protein target is around **{protein_target} g/day** based on your profile. Keep most meals balanced with protein, slow carbs, and healthy fats. Good options include eggs, chicken rice with extra lean meat, tofu, fish, Greek yogurt, oats, and fruit."
+
+    # Recovery and sleep
+    if any(w in msg for w in ["recovery", "recover", "sleep", "rest day", "sore"]):
+        return "Recovery matters as much as training. Aim for **7-9 hours of sleep**, drink enough water, and include protein after exercise. If you're sore, go for light walking, mobility work, and avoid stacking intense sessions on consecutive days unless you're already adapted to it."
+
+    # Weight loss / muscle gain guidance
+    if any(w in msg for w in ["lose fat", "weight loss", "cut", "gain muscle", "bulk", "maintain muscle"]):
+        if goal == "Lose":
+            return "Because your goal is **Lose**, focus on a moderate calorie deficit, high-protein meals, daily steps, and strength training 2-4 times per week so you keep muscle while dropping fat."
+        if goal == "Gain":
+            return "Because your goal is **Gain**, aim for a small calorie surplus, regular strength training, and protein spread across the day. Consistency usually beats trying to force huge calorie jumps."
+        return "For body recomposition, keep calories close to maintenance, prioritize protein, and train consistently. Small, repeatable habits work better than aggressive cuts or bulks."
+
+    # Local meal ideas
+    if any(w in msg for w in ["hong kong", "local food", "healthy meal", "healthy option", "restaurant"]):
+        return "Good Hong Kong-friendly choices include steamed fish with rice, congee with lean meat, wonton soup, roast meat with extra greens and less sauce, or cha chaan teng breakfasts with eggs and less sugary drinks. The easiest upgrade is usually **more protein, more vegetables, and fewer liquid calories**."
+
+    # Safety boundary for medical issues
+    if any(w in msg for w in ["chest pain", "faint", "dizzy", "injury", "injured", "sick", "fever"]):
+        return "That sounds more medical than fitness-related. I can give general wellness guidance, but symptoms like chest pain, fainting, severe dizziness, or injury should be checked by a qualified healthcare professional promptly."
+
     # Food suggestions
     if any(w in msg for w in ["suggest", "recommend", "what should i eat", "food idea", "meal idea", "hungry"]):
         if remaining < 200:
@@ -506,10 +625,10 @@ def get_chatbot_response(message: str, calorie_status: int, goal_value: int, wat
 
     # Help
     if any(w in msg for w in ["help", "what can you", "commands", "options"]):
-        return "I can help with:\n\u2022 **\"How many calories?\"** \u2014 check your intake\n\u2022 **\"What should I eat?\"** \u2014 food suggestions\n\u2022 **\"Water status\"** \u2014 hydration check\n\u2022 **\"Exercise\"** \u2014 today's activity\n\u2022 **\"Summary\"** \u2014 daily overview\n\u2022 **\"BMI\"** \u2014 calculate your BMI\n\u2022 **\"Goal\"** \u2014 your current target"
+        return "I can help with:\n\u2022 **\"How many calories?\"** \u2014 check your intake\n\u2022 **\"What should I eat?\"** \u2014 meal suggestions\n\u2022 **\"Protein tips\"** \u2014 macros and protein guidance\n\u2022 **\"Workout recovery\"** \u2014 sleep and rest advice\n\u2022 **\"Water status\"** \u2014 hydration check\n\u2022 **\"Exercise\"** \u2014 today's activity\n\u2022 **\"Summary\"** \u2014 daily overview\n\u2022 **\"BMI\"** \u2014 calculate your BMI\n\u2022 **\"Goal\"** \u2014 your current target"
 
     # Fallback
-    return f"I'm not sure about that, but I can help with calories, water, exercise, food suggestions, BMI, and daily summaries. Type **\"help\"** to see all options!"
+    return f"I can help with calories, meals, protein, hydration, workouts, recovery, BMI, and daily summaries. Try **\"help\"**, **\"protein tips\"**, **\"healthy Hong Kong meal\"**, or **\"today's summary\"**."
 
 
 def load_dashboard_data(api_base_url: str) -> tuple[list[dict], dict, dict]:
@@ -553,6 +672,24 @@ def get_current_user_name(api_base_url: str) -> str:
         return "Dawood"
 
 
+def render_sidebar_status_panel(profile_name: str, profile_count: int, user_data: dict) -> None:
+    height_cm = float(user_data.get("height", 0) or 0)
+    weight_kg = float(user_data.get("weight", 0) or 0)
+    bmi_value = weight_kg / (height_cm / 100) ** 2 if height_cm > 0 and weight_kg > 0 else 0
+    target_value = int(user_data.get("daily_calorie_target", get_goal_value(user_data))) if user_data else 0
+    status_items = [
+        ("Profile", profile_name, f"{profile_count} saved profile{'s' if profile_count != 1 else ''}.", "👤"),
+        ("Goal", str(user_data.get("goal", "Maintain")), "Current body-weight objective.", "🎯"),
+        ("Target", f"{target_value} kcal", "Daily calorie target.", "🔥"),
+        ("BMI", f"{bmi_value:.1f}" if bmi_value > 0 else "N/A", bmi_category(bmi_value) if bmi_value > 0 else "Add height and weight to calculate.", "📏"),
+    ]
+    chips_html = "".join(
+        f'<div class="status-chip"><div class="status-top"><span class="status-name">{_html.escape(name)}</span><span>{icon}</span></div><div class="status-value">{_html.escape(value)}</div><div class="status-detail">{_html.escape(detail)}</div></div>'
+        for name, value, detail, icon in status_items
+    )
+    st.markdown(f'<div class="status-panel"><div class="status-grid">{chips_html}</div></div>', unsafe_allow_html=True)
+
+
 def show_login_screen() -> None:
     st.markdown("<style>[data-testid='stSidebar']{display:none;}</style>", unsafe_allow_html=True)
     _, center, _ = st.columns([1, 2.2, 1])
@@ -580,14 +717,15 @@ def show_login_screen() -> None:
             else:
                 user_names = [u["name"] for u in users]
                 selected_user = st.selectbox("Profile", user_names, key="login_user_select", label_visibility="collapsed", format_func=lambda n: f"\U0001f464  {n}")
-                if st.button("Sign In \u2192", type="primary", use_container_width=True):
-                    try:
-                        api_call("POST", "/api/users/select", api_base_url, {"name": selected_user})
-                        st.session_state["logged_in_user"] = selected_user
-                        st.session_state["api_base_url"] = api_base_url
-                        st.rerun()
-                    except requests.RequestException as err:
-                        st.error(f"Login failed: {err}")
+                if st.button("Sign In \u2192", type="primary", width="stretch"):
+                    run_api_action(
+                        lambda: api_call("POST", "/api/users/select", api_base_url, {"name": selected_user}),
+                        error_prefix="Login failed",
+                        on_success=lambda _result: (
+                            st.session_state.__setitem__("logged_in_user", selected_user),
+                            st.session_state.__setitem__("api_base_url", api_base_url),
+                        ),
+                    )
 
         with sign_up:
             r1c1, r1c2 = st.columns(2, gap="medium")
@@ -602,20 +740,24 @@ def show_login_screen() -> None:
                 new_weight = st.number_input("Weight (kg)", min_value=20.0, max_value=300.0, step=0.5, value=70.0, key="login_new_weight")
             with r2c3:
                 new_height = st.number_input("Height (cm)", min_value=50.0, max_value=250.0, step=0.5, value=175.0, key="login_new_height")
-            if st.button("Create Account \u2192", type="primary", use_container_width=True):
+            if st.button("Create Account \u2192", type="primary", width="stretch"):
                 if not new_name.strip():
                     st.error("Name is required.")
                 elif users and new_name.strip().lower() in {u["name"].lower() for u in users}:
                     st.warning("This name already exists.")
                 else:
-                    try:
-                        api_call("POST", "/api/users", api_base_url, {"name": new_name.strip(), "age": int(new_age), "weight": float(new_weight), "height": float(new_height), "goal": new_goal})
-                        api_call("POST", "/api/users/select", api_base_url, {"name": new_name.strip()})
-                        st.session_state["logged_in_user"] = new_name.strip()
-                        st.session_state["api_base_url"] = api_base_url
-                        st.rerun()
-                    except requests.RequestException as err:
-                        st.error(f"Could not create profile: {err}")
+                    created_name = new_name.strip()
+                    run_api_action(
+                        lambda: (
+                            api_call("POST", "/api/users", api_base_url, {"name": created_name, "age": int(new_age), "weight": float(new_weight), "height": float(new_height), "goal": new_goal}),
+                            api_call("POST", "/api/users/select", api_base_url, {"name": created_name}),
+                        ),
+                        error_prefix="Could not create profile",
+                        on_success=lambda _result: (
+                            st.session_state.__setitem__("logged_in_user", created_name),
+                            st.session_state.__setitem__("api_base_url", api_base_url),
+                        ),
+                    )
 
         st.markdown("""<div class="login-features" style="margin-top:0.8rem;">
             <div class="login-feature"><div class="login-feature-icon">\U0001f525</div>Calories</div>
@@ -639,12 +781,8 @@ def show_main_dashboard() -> None:
         if api_base_url_input != api_base_url:
             st.session_state["api_base_url"] = api_base_url_input
             api_base_url = api_base_url_input
-        if st.button("Check API Health"):
-            try:
-                health = api_call("GET", "/health", api_base_url)
-                st.success(f"API reachable: {health.get('status', 'unknown')}")
-            except requests.RequestException as err:
-                st.error(f"API not reachable: {err}")
+        if st.button("Refresh Status", width="stretch"):
+            st.rerun()
         st.markdown("---")
         if st.button("\U0001f6aa Logout", type="secondary"):
             for key in ("logged_in_user", "api_base_url"):
@@ -657,18 +795,20 @@ def show_main_dashboard() -> None:
         except requests.RequestException:
             users = []
 
+        current_user_data = {}
+
         if users:
             user_names = [u["name"] for u in users]
             current_name = st.session_state.get("logged_in_user", get_current_user_name(api_base_url))
+            current_user_data = next((u for u in users if u["name"] == current_name), {})
             selected_index = user_names.index(current_name) if current_name in user_names else 0
             selected_profile = st.selectbox("Switch profile", user_names, index=selected_index, key="switch_profile")
             if st.button("Switch profile"):
-                try:
-                    api_call("POST", "/api/users/select", api_base_url, {"name": selected_profile})
-                    st.session_state["logged_in_user"] = selected_profile
-                    st.rerun()
-                except requests.RequestException as err:
-                    st.error(f"Could not switch: {err}")
+                run_api_action(
+                    lambda: api_call("POST", "/api/users/select", api_base_url, {"name": selected_profile}),
+                    error_prefix="Could not switch",
+                    on_success=lambda _result: st.session_state.__setitem__("logged_in_user", selected_profile),
+                )
 
         with st.expander("\u2795 Create profile"):
             new_name = st.text_input("Name", key="new_name")
@@ -682,12 +822,64 @@ def show_main_dashboard() -> None:
                 elif new_name.strip().lower() in {u["name"].lower() for u in users}:
                     st.warning("Already exists.")
                 else:
-                    try:
-                        api_call("POST", "/api/users", api_base_url, {"name": new_name, "age": int(new_age), "weight": float(new_weight), "height": float(new_height), "goal": new_goal})
-                        st.success("Profile created.")
-                        st.rerun()
-                    except requests.RequestException as err:
-                        st.error(f"Error: {err}")
+                    run_api_action(
+                        lambda: api_call("POST", "/api/users", api_base_url, {"name": new_name, "age": int(new_age), "weight": float(new_weight), "height": float(new_height), "goal": new_goal}),
+                        success_message="Profile created.",
+                    )
+
+        with st.expander("\u270f\ufe0f Edit Profile"):
+            current_user_data = next((u for u in users if u["name"] == logged_in_user), current_user_data)
+            edit_name = st.text_input("Name", value=current_user_data.get("name", ""), key="edit_name")
+            edit_age = st.number_input("Age", min_value=1, step=1, value=int(current_user_data.get("age", 25)), key="edit_age")
+            edit_weight = st.number_input("Weight (kg)", min_value=1.0, step=0.5, value=float(current_user_data.get("weight", 70)), key="edit_weight")
+            edit_height = st.number_input("Height (cm)", min_value=1.0, step=0.5, value=float(current_user_data.get("height", 175)), key="edit_height")
+            edit_goal = st.selectbox("Goal", ["Maintain", "Lose", "Gain"], index=["Maintain", "Lose", "Gain"].index(current_user_data.get("goal", "Maintain")), key="edit_goal")
+            edit_target = st.number_input("Daily Calorie Target", min_value=500, max_value=10000, step=50, value=int(current_user_data.get("daily_calorie_target", 2000)), key="edit_target")
+            if st.button("Save Changes", type="primary"):
+                if not edit_name.strip():
+                    st.error("Name cannot be empty.")
+                else:
+                    run_api_action(
+                        lambda: api_call("PUT", "/api/user", api_base_url, {
+                            "name": edit_name.strip(),
+                            "age": int(edit_age),
+                            "weight": float(edit_weight),
+                            "height": float(edit_height),
+                            "goal": edit_goal,
+                            "daily_calorie_target": int(edit_target),
+                        }),
+                        success_message="Profile updated!",
+                        on_success=lambda _result: st.session_state.__setitem__("logged_in_user", edit_name.strip()),
+                    )
+
+        try:
+            sidebar_foods = api_call("GET", "/api/foods", api_base_url).get("foods", [])
+        except requests.RequestException:
+            sidebar_foods = []
+
+        st.markdown("## Profile Snapshot")
+        render_sidebar_status_panel(logged_in_user, len(users), current_user_data)
+
+        with st.expander("\U0001f962 Add Food"):
+            st.markdown(f"**{len(sidebar_foods)} foods in database**")
+            if sidebar_foods:
+                categories = sorted({f.get("category", "General") for f in sidebar_foods})
+                cat_filter = st.selectbox("Filter by category", ["All"] + categories, key="sidebar_food_cat_filter")
+                filtered = sidebar_foods if cat_filter == "All" else [f for f in sidebar_foods if f.get("category") == cat_filter]
+                st.dataframe(filtered, width="stretch", hide_index=True, height=260)
+
+            with st.form("sidebar_food_form"):
+                food_name = st.text_input("Food name", placeholder="e.g. Char Siu Rice")
+                fc1, fc2 = st.columns(2)
+                with fc1:
+                    food_calories = st.number_input("Calories", min_value=1, step=10, value=300)
+                with fc2:
+                    food_category = st.selectbox("Category", ["Food", "Drink", "Snack", "Dessert", "General"])
+                if st.form_submit_button("Add Food", width="stretch"):
+                    run_api_action(
+                        lambda: api_call("POST", "/api/foods", api_base_url, {"name": food_name, "calories": int(food_calories), "category": food_category}),
+                        success_message="Food added!",
+                    )
 
         if len(users) > 1:
             with st.expander("\U0001f5d1\ufe0f Delete profile"):
@@ -697,20 +889,18 @@ def show_main_dashboard() -> None:
                     if not confirm:
                         st.error("Please confirm.")
                     else:
-                        try:
-                            api_call("DELETE", "/api/users", api_base_url, {"name": delete_name})
-                            st.success(f"Deleted '{delete_name}'.")
-                            if st.session_state.get("logged_in_user") == delete_name:
-                                del st.session_state["logged_in_user"]
-                            st.rerun()
-                        except requests.RequestException as err:
-                            st.error(f"Error: {err}")
+                        run_api_action(
+                            lambda: api_call("DELETE", "/api/users", api_base_url, {"name": delete_name}),
+                            success_message=f"Deleted '{delete_name}'.",
+                            on_success=lambda _result: st.session_state.pop("logged_in_user", None) if st.session_state.get("logged_in_user") == delete_name else None,
+                        )
 
     # Load data
     try:
         foods, log_data, user = load_dashboard_data(api_base_url)
     except requests.RequestException as err:
         st.error("Could not load data. Start Flask API and check URL.")
+        st.info(f"Launch the backend with {'./run_backend.sh' if os.name != 'nt' else '.\\run_backend.ps1'} and refresh once it is running.")
         st.exception(err)
         return
 
@@ -761,6 +951,14 @@ def show_main_dashboard() -> None:
     render_macro_bars(calorie_status)
     render_progress_bar(calorie_status, goal_value)
 
+    summary_text = build_daily_summary_text(user, log_data, goal_value, water_intake, water_goal, exercise_burned, exercises)
+    st.download_button(
+        "Download Daily Summary",
+        data=summary_text,
+        file_name=f"hk-calorie-summary-{datetime.date.today().isoformat()}.txt",
+        mime="text/plain",
+    )
+
     if calorie_status > goal_value:
         st.error("\u26a0\ufe0f You've exceeded your daily calorie goal!")
     elif calorie_status > 0:
@@ -769,8 +967,8 @@ def show_main_dashboard() -> None:
     st.markdown("<div class='theme-divider'></div>", unsafe_allow_html=True)
 
     # Tabs
-    tab_diary, tab_exercise, tab_water, tab_foods, tab_goals, tab_history, tab_chat = st.tabs(
-        ["\U0001f4cb Food Diary", "\U0001f3c3 Exercise", "\U0001f4a7 Water", "\U0001f962 Foods", "\U0001f3af Goals & BMI", "\U0001f4ca Insights", "\U0001f916 AI Chat"]
+    tab_diary, tab_exercise, tab_water, tab_goals, tab_history, tab_chat = st.tabs(
+        ["\U0001f4cb Food Diary", "\U0001f3c3 Exercise", "\U0001f4a7 Water", "\U0001f3af Goals & BMI", "\U0001f4ca Insights", "\U0001f916 AI Chat"]
     )
 
     # Food Diary
@@ -790,34 +988,46 @@ def show_main_dashboard() -> None:
             if log_data.get("entries"):
                 for entry in log_data["entries"]:
                     mi = {"Breakfast": "\U0001f373", "Lunch": "\U0001f35c", "Dinner": "\U0001f355", "Snack": "\U0001f36a"}.get(entry.get("meal", ""), "\U0001f37d\ufe0f")
-                    st.markdown(f'<div class="entry-row"><span style="flex:0.3; text-align:center;">{mi}</span><span class="entry-name">{entry["food_name"]}</span><span class="entry-qty">{entry["quantity"]}x</span><span class="entry-cal">{entry["total_calories"]} kcal</span></div>', unsafe_allow_html=True)
+                    ec_left, ec_right = st.columns([0.85, 0.15])
+                    with ec_left:
+                        st.markdown(f'<div class="entry-row"><span style="flex:0.3; text-align:center;">{mi}</span><span class="entry-name">{entry["food_name"]}</span><span class="entry-qty">{entry["quantity"]}x</span><span class="entry-cal">{entry["total_calories"]} kcal</span></div>', unsafe_allow_html=True)
+                    with ec_right:
+                        if st.button("\u2716", key=f"del_food_{entry['food_name']}", help=f"Remove {entry['food_name']}"):
+                            run_api_action(
+                                lambda: api_call("DELETE", "/api/log/entry", api_base_url, {"food_name": entry["food_name"]}),
+                            )
             else:
                 st.info("No food logged yet today. Use the form to start tracking!")
 
         with diary_right:
             st.markdown("**Quick Log**")
+            food_search = st.text_input("Search foods", key="log_food_search", placeholder="Type a food name...")
+            matching_foods = [
+                food for food in foods
+                if food_search.strip().lower() in food["name"].lower()
+            ] if food_search.strip() else foods
+            if food_search.strip() and not matching_foods:
+                st.warning("No foods match that search.")
             with st.form("log_form"):
-                selected_food = st.selectbox("Select food", [f["name"] for f in foods], key="log_food_select")
+                food_options = [f["name"] for f in matching_foods] if matching_foods else [f["name"] for f in foods]
+                selected_food = st.selectbox("Select food", food_options, key="log_food_select")
                 q_col, m_col = st.columns(2)
                 with q_col:
                     quantity = st.number_input("Qty", min_value=1, step=1, value=1, key="log_quantity")
                 with m_col:
                     meal_type = st.selectbox("Meal", ["Breakfast", "Lunch", "Dinner", "Snack", "General"], key="log_meal_type")
-                if st.form_submit_button("Log Food", use_container_width=True):
+                if st.form_submit_button("Log Food", width="stretch"):
                     if foods:
-                        try:
-                            api_call("POST", "/api/log", api_base_url, {"food_name": selected_food, "quantity": int(quantity), "meal": meal_type})
-                            st.success(f"Logged {quantity}x {selected_food}")
-                            st.rerun()
-                        except requests.RequestException as err:
-                            st.error(f"Could not log: {err}")
-            if st.button("\U0001f504 Reset Day", use_container_width=True):
-                try:
-                    api_call("DELETE", "/api/log", api_base_url)
-                    st.success("Day reset!")
-                    st.rerun()
-                except requests.RequestException as err:
-                    st.error(f"Error: {err}")
+                        run_api_action(
+                            lambda: api_call("POST", "/api/log", api_base_url, {"food_name": selected_food, "quantity": int(quantity), "meal": meal_type}),
+                            success_message=f"Logged {quantity}x {selected_food}",
+                            error_prefix="Could not log",
+                        )
+            if st.button("\U0001f504 Reset Day", width="stretch"):
+                run_api_action(
+                    lambda: api_call("DELETE", "/api/log", api_base_url),
+                    success_message="Day reset!",
+                )
 
     # Exercise
     with tab_exercise:
@@ -834,8 +1044,15 @@ def show_main_dashboard() -> None:
                 render_stat_card("Duration", f"{total_duration} min", "\u23f1\ufe0f")
             if exercises:
                 st.markdown("**Today's Activities**")
-                for ex in exercises:
-                    st.markdown(f'<div class="exercise-entry"><span class="ex-name">{ex["name"]}</span><span class="ex-dur">{ex.get("duration_min", 30)} min</span><span class="ex-cal">-{ex["calories_burned"]} kcal</span></div>', unsafe_allow_html=True)
+                for idx, ex in enumerate(exercises):
+                    ex_left_col, ex_del_col = st.columns([0.85, 0.15])
+                    with ex_left_col:
+                        st.markdown(f'<div class="exercise-entry"><span class="ex-name">{ex["name"]}</span><span class="ex-dur">{ex.get("duration_min", 30)} min</span><span class="ex-cal">-{ex["calories_burned"]} kcal</span></div>', unsafe_allow_html=True)
+                    with ex_del_col:
+                        if st.button("\u2716", key=f"del_ex_{idx}", help=f"Remove {ex['name']}"):
+                            run_api_action(
+                                lambda: api_call("DELETE", "/api/exercise/entry", api_base_url, {"index": idx}),
+                            )
             else:
                 st.info("No exercises logged today. Add one to offset your calories!")
         with ex_right:
@@ -855,14 +1072,12 @@ def show_main_dashboard() -> None:
                     ex_cal = st.number_input("Calories burned", min_value=1, step=10, value=ex_cal_default, key="ex_cal")
                 with ec2:
                     ex_dur = st.number_input("Duration (min)", min_value=1, step=5, value=30, key="ex_dur")
-                if st.form_submit_button("Log Exercise", use_container_width=True):
+                if st.form_submit_button("Log Exercise", width="stretch"):
                     if ex_name_input.strip():
-                        try:
-                            api_call("POST", "/api/exercise", api_base_url, {"name": ex_name_input.strip(), "calories_burned": int(ex_cal), "duration_min": int(ex_dur)})
-                            st.success(f"Logged {ex_name_input.strip()} (-{ex_cal} kcal)")
-                            st.rerun()
-                        except requests.RequestException as err:
-                            st.error(f"Error: {err}")
+                        run_api_action(
+                            lambda: api_call("POST", "/api/exercise", api_base_url, {"name": ex_name_input.strip(), "calories_burned": int(ex_cal), "duration_min": int(ex_dur)}),
+                            success_message=f"Logged {ex_name_input.strip()} (-{ex_cal} kcal)",
+                        )
                     else:
                         st.error("Activity name is required.")
 
@@ -874,50 +1089,18 @@ def show_main_dashboard() -> None:
             render_water_visual(water_intake, water_goal)
         with w_right:
             glasses_to_add = st.number_input("Glasses to add", min_value=1, max_value=10, step=1, value=1, key="water_add")
-            if st.button("\U0001f4a7 Log Water", use_container_width=True):
-                try:
-                    api_call("POST", "/api/water", api_base_url, {"glasses": int(glasses_to_add)})
-                    st.success(f"Added {glasses_to_add} glass(es)!")
-                    st.rerun()
-                except requests.RequestException as err:
-                    st.error(f"Error: {err}")
+            if st.button("\U0001f4a7 Log Water", width="stretch"):
+                run_api_action(
+                    lambda: api_call("POST", "/api/water", api_base_url, {"glasses": int(glasses_to_add)}),
+                    success_message=f"Added {glasses_to_add} glass(es)!",
+                )
             st.markdown("---")
             new_water_goal = st.number_input("Daily goal (glasses)", min_value=1, max_value=20, step=1, value=water_goal, key="water_goal_input")
-            if st.button("Set Water Goal", use_container_width=True):
-                try:
-                    api_call("PUT", "/api/water/goal", api_base_url, {"goal": int(new_water_goal)})
-                    st.success(f"Goal \u2192 {new_water_goal} glasses")
-                    st.rerun()
-                except requests.RequestException as err:
-                    st.error(f"Error: {err}")
-
-    # Foods
-    with tab_foods:
-        render_section_header("\U0001f962", "Food Database", "rgba(108,92,231,0.12)")
-        f_left, f_right = st.columns([0.5, 0.5], gap="large")
-        with f_left:
-            st.markdown(f"**{len(foods)} foods in database**")
-            if foods:
-                categories = sorted({f.get("category", "General") for f in foods})
-                cat_filter = st.selectbox("Filter by category", ["All"] + categories, key="food_cat_filter")
-                filtered = foods if cat_filter == "All" else [f for f in foods if f.get("category") == cat_filter]
-                st.dataframe(filtered, use_container_width=True, hide_index=True, height=400)
-        with f_right:
-            st.markdown("**Add New Food**")
-            with st.form("food_form"):
-                food_name = st.text_input("Food name", placeholder="e.g. Char Siu Rice")
-                fc1, fc2 = st.columns(2)
-                with fc1:
-                    food_calories = st.number_input("Calories", min_value=1, step=10, value=300)
-                with fc2:
-                    food_category = st.selectbox("Category", ["Food", "Drink", "Snack", "Dessert", "General"])
-                if st.form_submit_button("Add Food", use_container_width=True):
-                    try:
-                        api_call("POST", "/api/foods", api_base_url, {"name": food_name, "calories": int(food_calories), "category": food_category})
-                        st.success("Food added!")
-                        st.rerun()
-                    except requests.RequestException as err:
-                        st.error(f"Error: {err}")
+            if st.button("Set Water Goal", width="stretch"):
+                run_api_action(
+                    lambda: api_call("PUT", "/api/water/goal", api_base_url, {"goal": int(new_water_goal)}),
+                    success_message=f"Goal \u2192 {new_water_goal} glasses",
+                )
 
     # Goals & BMI
     with tab_goals:
@@ -927,19 +1110,17 @@ def show_main_dashboard() -> None:
             st.markdown("**Calorie Goal**")
             current_target = int(user.get("daily_calorie_target", goal_value))
             new_target = st.number_input("Daily calorie target (kcal)", min_value=800, max_value=10000, step=50, value=current_target, key="goal_target")
-            if st.button("Save Calorie Goal", use_container_width=True):
-                try:
-                    api_call("PUT", "/api/user", api_base_url, {"name": user.get("name", ""), "age": int(user.get("age", 20)), "weight": float(user.get("weight", 70)), "height": float(user.get("height", 175)), "goal": user.get("goal", "Maintain"), "daily_calorie_target": int(new_target)})
-                    st.success(f"Goal \u2192 {new_target} kcal")
-                    st.rerun()
-                except requests.RequestException as err:
-                    st.error(f"Error: {err}")
+            if st.button("Save Calorie Goal", width="stretch"):
+                run_api_action(
+                    lambda: api_call("PUT", "/api/user", api_base_url, {"name": user.get("name", ""), "age": int(user.get("age", 20)), "weight": float(user.get("weight", 70)), "height": float(user.get("height", 175)), "goal": user.get("goal", "Maintain"), "daily_calorie_target": int(new_target)}),
+                    success_message=f"Goal \u2192 {new_target} kcal",
+                )
             st.metric("Current Goal", f"{current_target} kcal")
         with g_right:
             st.markdown("**BMI Calculator**")
             calc_height = st.number_input("Height (cm)", min_value=1.0, step=0.5, value=float(user.get("height", 175)), key="bmi_height")
             calc_weight = st.number_input("Weight (kg)", min_value=1.0, step=0.5, value=float(user.get("weight", 70)), key="bmi_weight")
-            if st.button("Calculate BMI", use_container_width=True):
+            if st.button("Calculate BMI", width="stretch"):
                 try:
                     height_m = calc_height / 100
                     bmi_result = calc_weight / (height_m ** 2)
@@ -958,6 +1139,14 @@ def show_main_dashboard() -> None:
         min_cal = min(h for h in history if h > 0) if any(h > 0 for h in history) else 0
         total_days = len([h for h in history if h > 0])
 
+        if history:
+            st.download_button(
+                "Download Weekly History CSV",
+                data=build_weekly_history_csv(history, goal_value),
+                file_name=f"hk-calorie-history-{datetime.date.today().isoformat()}.csv",
+                mime="text/csv",
+            )
+
         i_a, i_b, i_c, i_d = st.columns(4, gap="medium")
         with i_a:
             st.markdown(f'<div class="insight-card"><div class="ic-label">7-Day Average</div><div class="ic-value">{avg_cal:.0f}</div><div class="ic-sub">kcal / day</div></div>', unsafe_allow_html=True)
@@ -974,7 +1163,25 @@ def show_main_dashboard() -> None:
             h_left, h_right = st.columns([0.6, 0.4], gap="large")
             with h_left:
                 st.markdown("**Calorie Trend**")
-                st.bar_chart(history)
+                day_labels = [(datetime.date.today() - datetime.timedelta(days=len(history) - 1 - i)).strftime("%a %d") for i in range(len(history))]
+                chart_df = pd.DataFrame({"Day": day_labels, "Calories": history, "order": list(range(len(history)))})
+                chart_df["Status"] = chart_df["Calories"].apply(lambda c: "Over" if c > goal_value else ("On Track" if c > 0 else "Rest"))
+                color_scale = alt.Scale(domain=["On Track", "Over", "Rest"], range=["#00d4aa", "#e74c3c", "#333333"])
+                bars = alt.Chart(chart_df).mark_bar(
+                    cornerRadiusTopLeft=6, cornerRadiusTopRight=6, size=24
+                ).encode(
+                    x=alt.X("Day:N", sort=alt.EncodingSortField(field="order"), axis=alt.Axis(labelAngle=-45, labelColor="#a0a0b0", title=None)),
+                    y=alt.Y("Calories:Q", axis=alt.Axis(labelColor="#a0a0b0", title="kcal", gridColor="rgba(255,255,255,0.05)")),
+                    color=alt.Color("Status:N", scale=color_scale, legend=None),
+                    tooltip=["Day:N", "Calories:Q", "Status:N"]
+                )
+                goal_line = alt.Chart(pd.DataFrame({"goal": [goal_value]})).mark_rule(
+                    strokeDash=[6, 4], color="#f39c12", strokeWidth=2
+                ).encode(y="goal:Q")
+                goal_text = alt.Chart(pd.DataFrame({"goal": [goal_value], "label": [f"Goal: {goal_value}"]})).mark_text(
+                    align="right", dx=-4, dy=-8, color="#f39c12", fontSize=11, fontWeight="bold"
+                ).encode(y="goal:Q", text="label:N")
+                st.altair_chart((bars + goal_line + goal_text).properties(height=320).configure(background="transparent").configure_view(strokeWidth=0), width="stretch")
             with h_right:
                 st.markdown("**Daily Breakdown**")
                 rows = [{"Day": f"Day {i+1}", "Calories": v, "Status": "\u2705" if 0 < v <= goal_value else ("\u26a0\ufe0f" if v > goal_value else "\u2014")} for i, v in enumerate(history)]
@@ -1005,12 +1212,12 @@ def show_main_dashboard() -> None:
 
     # AI Chat
     with tab_chat:
-        render_section_header("\U0001f916", "Nutrition Assistant", "rgba(0,212,170,0.12)")
-        st.markdown('<div style="color:var(--ink-secondary); font-size:0.82rem; margin-bottom:1rem;">Ask me about your calories, water intake, exercise, food suggestions, BMI, or get a daily summary.</div>', unsafe_allow_html=True)
+        render_section_header("\U0001f916", "AI Health Coach", "rgba(0,212,170,0.12)")
+        st.markdown('<div style="color:var(--ink-secondary); font-size:0.82rem; margin-bottom:1rem;">Local AI mode is active. Ask about calories, protein, hydration, workouts, recovery, healthy Hong Kong meals, BMI, or get a daily summary.</div>', unsafe_allow_html=True)
 
         if "chat_messages" not in st.session_state:
             st.session_state["chat_messages"] = [
-                {"role": "bot", "text": f"Hey {logged_in_user}! \U0001f44b I'm your nutrition assistant. Ask me anything about your diet, exercise, or health goals!"}
+                {"role": "bot", "text": f"Hey {logged_in_user}! \U0001f44b I'm your AI health coach. Ask me about meals, protein, hydration, exercise, recovery, or your progress for today."}
             ]
 
         # Display chat history
@@ -1028,13 +1235,13 @@ def show_main_dashboard() -> None:
         qc1, qc2, qc3, qc4 = st.columns(4, gap="small")
         quick_prompts = [
             (qc1, "\U0001f525 Calories", "How many calories have I eaten?"),
-            (qc2, "\U0001f4a7 Water", "Water status"),
-            (qc3, "\U0001f35c Suggest food", "What should I eat?"),
+            (qc2, "\U0001f4aa Protein", "Protein tips"),
+            (qc3, "\U0001f35c Meal idea", "Give me a healthy Hong Kong meal idea"),
             (qc4, "\U0001f4cb Summary", "Give me today's summary"),
         ]
         for col, label, prompt in quick_prompts:
             with col:
-                if st.button(label, use_container_width=True, key=f"quick_{label}"):
+                if st.button(label, width="stretch", key=f"quick_{label}"):
                     st.session_state["chat_messages"].append({"role": "user", "text": prompt})
                     reply = get_chatbot_response(prompt, calorie_status, goal_value, water_intake, water_goal, exercise_burned, exercises, user, foods, log_data.get("entries", []))
                     st.session_state["chat_messages"].append({"role": "bot", "text": reply})
@@ -1043,7 +1250,7 @@ def show_main_dashboard() -> None:
         # Text input
         with st.form("chat_form", clear_on_submit=True):
             user_input = st.text_input("Type your message...", key="chat_input", label_visibility="collapsed", placeholder="Ask me anything about your nutrition...")
-            if st.form_submit_button("Send \U0001f680", use_container_width=True):
+            if st.form_submit_button("Send \U0001f680", width="stretch"):
                 if user_input.strip():
                     st.session_state["chat_messages"].append({"role": "user", "text": user_input.strip()})
                     reply = get_chatbot_response(user_input, calorie_status, goal_value, water_intake, water_goal, exercise_burned, exercises, user, foods, log_data.get("entries", []))
@@ -1069,7 +1276,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     if not st.runtime.exists() and os.environ.get("STREAMLIT_RUN_FROM_CLI") != "true":
-        print("This is a Streamlit app. Run: streamlit run streamlit_app.py")
+        frontend_hint = ".\\run_frontend.ps1" if os.name == "nt" else "./run_frontend.sh"
+        backend_hint = ".\\run_backend.ps1" if os.name == "nt" else "./run_backend.sh"
+        print(f"This is a Streamlit app. Start the backend with {backend_hint}, then run the frontend with {frontend_hint}.")
     else:
         main()
 
