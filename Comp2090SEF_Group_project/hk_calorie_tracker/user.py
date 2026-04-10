@@ -1,5 +1,10 @@
 class User:
-    """Encapsulation: __daily_calories is private, accessed only via methods."""
+    """User profile model.
+
+    The private ``__daily_calories`` field highlights encapsulation: outside
+    code should interact with the value through this class's methods instead of
+    mutating it directly.
+    """
 
     def __init__(self, name, age, weight, height, goal, daily_calorie_target: int = 2000):
         self.name = name
@@ -8,7 +13,7 @@ class User:
         self.height = height
         self.goal = goal
         self.daily_calorie_target = daily_calorie_target
-        self.__daily_calories = 0  # Encapsulated (private)
+        self.__daily_calories = 0
 
     def add_calories(self, calories):
         self.__daily_calories += calories

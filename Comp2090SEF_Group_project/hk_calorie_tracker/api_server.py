@@ -16,6 +16,12 @@ from user import User
 
 
 class CalorieTrackerService:
+    """Application service that coordinates the app's OOP models.
+
+    It composes ``User``, ``FoodDatabase``, ``DailyLog``, and ``HKFood``
+    objects and exposes higher-level operations for the Flask API layer.
+    """
+
     def __init__(self) -> None:
         self._lock = Lock()
         self._state_file = Path(__file__).with_name("tracker_state.db")

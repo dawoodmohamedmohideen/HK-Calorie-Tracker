@@ -7,7 +7,11 @@ T = TypeVar("T")
 
 
 class ItemCollectionADT(Generic[T]):
-    """A simple list-backed ADT for ordered item storage."""
+    """A simple list-backed ADT for ordered item storage.
+
+    The internal representation stays hidden behind a small public interface,
+    which makes the abstract data type role clearer in the codebase.
+    """
 
     def __init__(self, items: Iterable[T] | None = None):
         self._items = list(items or [])

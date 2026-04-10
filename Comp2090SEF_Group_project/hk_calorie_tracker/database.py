@@ -1,10 +1,18 @@
+from __future__ import annotations
+
 from collection_adt import ItemCollectionADT
 from food import HKFood
 
 
 class FoodDatabase:
+    """Stores food objects using an ADT-backed collection.
+
+    This class shows object composition: it owns an ``ItemCollectionADT`` of
+    ``HKFood`` objects instead of exposing a raw list directly.
+    """
+
     def __init__(self):
-        self.food_list = ItemCollectionADT()
+        self.food_list: ItemCollectionADT[HKFood] = ItemCollectionADT()
 
     def add_food(self, name, calories, category="General"):
         food = HKFood(name, calories, category)

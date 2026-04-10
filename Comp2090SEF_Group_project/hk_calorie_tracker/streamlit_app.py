@@ -900,7 +900,7 @@ def show_main_dashboard() -> None:
         foods, log_data, user = load_dashboard_data(api_base_url)
     except requests.RequestException as err:
         st.error("Could not load data. Start Flask API and check URL.")
-        st.info(f"Launch the backend with {'./run_backend.sh' if os.name != 'nt' else '.\\run_backend.ps1'} and refresh once it is running.")
+        st.info("Launch the backend with 'python run_backend.py' and refresh once it is running.")
         st.exception(err)
         return
 
@@ -1276,8 +1276,8 @@ def main() -> None:
 
 if __name__ == "__main__":
     if not st.runtime.exists() and os.environ.get("STREAMLIT_RUN_FROM_CLI") != "true":
-        frontend_hint = ".\\run_frontend.ps1" if os.name == "nt" else "./run_frontend.sh"
-        backend_hint = ".\\run_backend.ps1" if os.name == "nt" else "./run_backend.sh"
+        frontend_hint = "python run_frontend.py"
+        backend_hint = "python run_backend.py"
         print(f"This is a Streamlit app. Start the backend with {backend_hint}, then run the frontend with {frontend_hint}.")
     else:
         main()

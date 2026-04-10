@@ -18,7 +18,7 @@ HK Calorie Tracker is a Hong Kong-focused calorie tracking app built with Python
 - Object-oriented design with encapsulation, inheritance, and polymorphism across the core tracker models
 - ADT-backed food and log collections through `ItemCollectionADT` for safer reusable item storage
 - Refactored backend request handling and frontend API actions to reduce duplication and improve maintainability
-- Updated launcher scripts that correctly forward extra command-line arguments such as custom ports
+- Python launch scripts that correctly forward extra command-line arguments such as custom ports
 
 ## Project Structure
 
@@ -33,8 +33,8 @@ Core modules:
 Web app modules:
 - `api_server.py`: Flask API for the tracker with shared request and response helpers to reduce repeated endpoint logic
 - `streamlit_app.py`: Streamlit dashboard UI with shared API action handling for success, error, and rerun flow
-- `run_backend.sh` / `run_frontend.sh`: Unix launch scripts with forwarded extra CLI arguments
-- `run_backend.ps1` / `run_frontend.ps1`: Windows launch scripts with forwarded extra CLI arguments
+- `run_backend.py`: Python launcher for the backend service
+- `run_frontend.py`: Python launcher for the Streamlit frontend
 
 ## Flask API Endpoints
 
@@ -60,41 +60,20 @@ Web app modules:
 
 1. Open a terminal in this folder.
 2. Create a virtual environment.
-3. Activate it.
-4. Install dependencies.
-
-Windows:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-macOS / Linux:
+3. Install dependencies with Python.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+python -m venv .venv
+python -m pip install -r requirements.txt
 ```
 
 ## Run The App
 
 Start the backend and frontend in separate terminals from this folder.
 
-Windows:
-
-```powershell
-.\run_backend.ps1
-.\run_frontend.ps1
-```
-
-macOS / Linux:
-
 ```bash
-./run_backend.sh
-./run_frontend.sh
+python run_backend.py
+python run_frontend.py
 ```
 
 Default URLs:
@@ -121,6 +100,7 @@ Default URLs:
 - The backend port can be overridden with `HK_TRACKER_API_PORT`
 - The AI coach currently runs in local mode and does not require a third-party API key
 - During debugging, the main flows were rechecked after the refactor and ADT changes, including profile creation, food logging, water tracking, exercise logging, and cleanup
+- The project launch flow is now Python-only through `run_backend.py` and `run_frontend.py`
 
 ## Team
 
