@@ -5,7 +5,7 @@ In this part of the project, our team conducted a self-study on additional data 
 The following topics were selected and implemented:
 
 * **Matrix (2D Array)** – Demonstrates how matrix data structures can be represented and manipulated using Python lists. -Mohamed Mohideen Dawood(13776731)
-* **Heap Sort** – A sorting algorithm that uses the heap data structure to sort elements efficiently. -Wu Chun Yin(13879841 
+* **Heap Sort** – A sorting algorithm that uses the heap data structure to sort elements efficiently. -Wu Chun Yin(13879941) 
 * **Shell Sort** – An improved sorting algorithm based on insertion sort that sorts elements by comparing items separated by a gap. -Pun Anjuli(13880208)
 
 Each implementation includes commented Python code and simple example tests to demonstrate how the data structure or algorithm works.
@@ -16,6 +16,6 @@ Done by,
 
 Mohamed Mohideen Dawood(13776731)
 
-Wu Chun Yin(13879841 )
+Wu Chun Yin(13879941)
 
 Pun Anjuli(13880208)
