@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import subprocess
 from pathlib import Path
 
 
@@ -21,12 +22,9 @@ def main() -> None:
     maybe_reexec_with_local_venv()
     script_dir = Path(__file__).resolve().parent
     os.chdir(script_dir)
-    os.environ["STREAMLIT_RUN_FROM_CLI"] = "true"
-
-    from streamlit.web import cli as stcli
-
-    sys.argv = ["streamlit", "run", str(script_dir / "streamlit_app.py"), *sys.argv[1:]]
-    raise SystemExit(stcli.main())
+    
+    streamlit_app = script_dir / "streamlit_app.py"
+    subprocess.run([sys.executable, "-m", "streamlit", "run", str(streamlit_app), *sys.argv[1:]], check=False)
 
 
 if __name__ == "__main__":
