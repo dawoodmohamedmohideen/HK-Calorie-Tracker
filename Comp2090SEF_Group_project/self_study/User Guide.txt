@@ -1,0 +1,16 @@
+Save each code as a separate .py file. 
+For Matrix: save as matrix.py, run with python. 
+Expected output:
+Matrix Data:
+[5, 10]
+[15, 20]
+
+For Heap Sort: save as heap_sort.py, run with python. 
+Expected output:
+Original list: [12, 11, 13, 5, 6, 7]
+Sorted list: [5, 6, 7, 11, 12, 13]
+
+For Shell Sort: save as shell_sort.py, run with python. 
+Expected output:
+Original List: [23, 12, 1, 8, 34, 54, 2, 3]
+Sorted List: [1, 2, 3, 8, 12, 23, 34, 54]
