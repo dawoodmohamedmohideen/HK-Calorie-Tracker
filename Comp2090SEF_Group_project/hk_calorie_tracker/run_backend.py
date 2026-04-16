@@ -26,7 +26,8 @@ def main() -> None:
     from api_server import app
 
     port = int(os.environ.get("HK_TRACKER_API_PORT", "5050"))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    venv_dir = str(script_dir / ".venv")
+    app.run(host="0.0.0.0", port=port, debug=True, exclude_patterns=[venv_dir])
 
 
 if __name__ == "__main__":
