@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import sqlite3
 from threading import Lock
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from flask import Flask, jsonify, request
 
@@ -383,7 +383,7 @@ class CalorieTrackerService:
     def current_log(self) -> DailyLog:
         return self.logs[self.current_user_index]
 
-    def _user_payload(self, user: User, index: int | None = None) -> Dict[str, Any]:
+    def _user_payload(self, user: User, index: int | None = None) -> Dict[str, int | str]:
         if index is None:
             index = self.current_user_index
         return {
@@ -402,7 +402,7 @@ class CalorieTrackerService:
             "exercise_burned": sum(e.get("calories_burned", 0) for e in (self.exercises[index] if 0 <= index < len(self.exercises) else [])),
         }
 
-    def _food_payload(self, food: Any) -> Dict[str, Any]:
+    def _food_payload(self, food) -> Dict[str, int | str]:
         return {
             "name": food.name,
             "calories": food.calories,
@@ -610,19 +610,19 @@ class CalorieTrackerService:
             self.exercises[self.current_user_index] = []
             self._save_state()
 
-    def get_user(self) -> Dict[str, Any]:
+    def get_user(self) -> Dict[str, int | str]:
         return self._user_payload(self.current_user())
 
-    def update_user(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def update_user(self, payload: Dict[str, object]) -> Dict[str, int | str]:
         with self._lock:
             user = self.current_user()
             user.name = str(payload.get("name", user.name)).strip() or user.name
-            user.age = int(payload.get("age", user.age) or 0)
-            user.weight = float(payload.get("weight", user.weight) or 0)
-            user.height = float(payload.get("height", user.height) or 0)
+            user.age = int(payload.get("age", user.age))
+            user.weight = float(payload.get("weight", user.weight))
+            user.height = float(payload.get("height", user.height))
             user.goal = str(payload.get("goal", user.goal)).strip() or user.goal
             daily_target = payload.get("daily_calorie_target", user.get_daily_calorie_target())
-            user.set_daily_calorie_target(int(daily_target or 2000))
+            user.set_daily_calorie_target(int(daily_target))
             self._save_state()
             return self.get_user()
 
@@ -692,7 +692,7 @@ def create_food() -> tuple:
         return fail("Field 'name' is required")
 
     try:
-        calories_int = int(calories or 0)
+        calories_int = int(calories)
         if calories_int <= 0:
             raise ValueError
     except (TypeError, ValueError):
@@ -784,10 +784,10 @@ def create_user() -> tuple:
         return fail("Field 'name' is required")
 
     try:
-        age_int = int(age or 0)
-        weight_float = float(weight or 0)
-        height_float = float(height or 0)
-        daily_target_int = int(daily_target or 2000)
+        age_int = int(age)
+        weight_float = float(weight)
+        height_float = float(height)
+        daily_target_int = int(daily_target)
     except (TypeError, ValueError):
         return fail("Age, weight, height, and daily_calorie_target must be numbers")
 

@@ -718,13 +718,13 @@ def show_login_screen() -> None:
                 user_names = [u["name"] for u in users]
                 selected_user = st.selectbox("Profile", user_names, key="login_user_select", label_visibility="collapsed", format_func=lambda n: f"\U0001f464  {n}")
                 if st.button("Sign In \u2192", type="primary", width="stretch"):
+                    def _set_user_and_api(_result: Any) -> None:
+                        st.session_state.__setitem__("logged_in_user", selected_user)
+                        st.session_state.__setitem__("api_base_url", api_base_url)
                     run_api_action(
                         lambda: api_call("POST", "/api/users/select", api_base_url, {"name": selected_user}),
                         error_prefix="Login failed",
-                        on_success=lambda _result: (
-                            st.session_state.__setitem__("logged_in_user", selected_user),
-                            st.session_state.__setitem__("api_base_url", api_base_url),
-                        ),
+                        on_success=_set_user_and_api,
                     )
 
         with sign_up:
@@ -747,16 +747,15 @@ def show_login_screen() -> None:
                     st.warning("This name already exists.")
                 else:
                     created_name = new_name.strip()
+                    def _create_and_select(_result: Any) -> None:
+                        api_call("POST", "/api/users/select", api_base_url, {"name": created_name})
+                    def _set_created_user(_result: Any) -> None:
+                        st.session_state.__setitem__("logged_in_user", created_name)
+                        st.session_state.__setitem__("api_base_url", api_base_url)
                     run_api_action(
-                        lambda: (
-                            api_call("POST", "/api/users", api_base_url, {"name": created_name, "age": int(new_age), "weight": float(new_weight), "height": float(new_height), "goal": new_goal}),
-                            api_call("POST", "/api/users/select", api_base_url, {"name": created_name}),
-                        ),
+                        lambda: api_call("POST", "/api/users", api_base_url, {"name": created_name, "age": int(new_age), "weight": float(new_weight), "height": float(new_height), "goal": new_goal}),
                         error_prefix="Could not create profile",
-                        on_success=lambda _result: (
-                            st.session_state.__setitem__("logged_in_user", created_name),
-                            st.session_state.__setitem__("api_base_url", api_base_url),
-                        ),
+                        on_success=_set_created_user,
                     )
 
         st.markdown("""<div class="login-features" style="margin-top:0.8rem;">
@@ -770,7 +769,7 @@ def show_login_screen() -> None:
 
 
 def show_main_dashboard() -> None:
-    api_base_url = st.session_state.get("api_base_url", DEFAULT_API_URL)
+    api_base_url: str = st.session_state.get("api_base_url", DEFAULT_API_URL) or DEFAULT_API_URL
     logged_in_user = st.session_state["logged_in_user"]
 
     with st.sidebar:
@@ -791,7 +790,7 @@ def show_main_dashboard() -> None:
         st.markdown("---")
 
         try:
-            users = load_users(api_base_url)
+            users = load_users(api_base_url or DEFAULT_API_URL)
         except requests.RequestException:
             users = []
 
@@ -799,13 +798,13 @@ def show_main_dashboard() -> None:
 
         if users:
             user_names = [u["name"] for u in users]
-            current_name = st.session_state.get("logged_in_user", get_current_user_name(api_base_url))
+            current_name = st.session_state.get("logged_in_user", get_current_user_name(api_base_url or DEFAULT_API_URL))
             current_user_data = next((u for u in users if u["name"] == current_name), {})
             selected_index = user_names.index(current_name) if current_name in user_names else 0
             selected_profile = st.selectbox("Switch profile", user_names, index=selected_index, key="switch_profile")
             if st.button("Switch profile"):
                 run_api_action(
-                    lambda: api_call("POST", "/api/users/select", api_base_url, {"name": selected_profile}),
+                    lambda: api_call("POST", "/api/users/select", api_base_url or DEFAULT_API_URL, {"name": selected_profile}),
                     error_prefix="Could not switch",
                     on_success=lambda _result: st.session_state.__setitem__("logged_in_user", selected_profile),
                 )
@@ -823,13 +822,13 @@ def show_main_dashboard() -> None:
                     st.warning("Already exists.")
                 else:
                     run_api_action(
-                        lambda: api_call("POST", "/api/users", api_base_url, {"name": new_name, "age": int(new_age), "weight": float(new_weight), "height": float(new_height), "goal": new_goal}),
+                        lambda: api_call("POST", "/api/users", api_base_url or DEFAULT_API_URL, {"name": new_name, "age": int(new_age), "weight": float(new_weight), "height": float(new_height), "goal": new_goal}),
                         success_message="Profile created.",
                     )
 
         with st.expander("\u270f\ufe0f Edit Profile"):
             current_user_data = next((u for u in users if u["name"] == logged_in_user), current_user_data)
-            edit_name = st.text_input("Name", value=current_user_data.get("name", ""), key="edit_name")
+            edit_name: str = st.text_input("Name", value=current_user_data.get("name", ""), key="edit_name") or ""
             edit_age = st.number_input("Age", min_value=1, step=1, value=int(current_user_data.get("age", 25)), key="edit_age")
             edit_weight = st.number_input("Weight (kg)", min_value=1.0, step=0.5, value=float(current_user_data.get("weight", 70)), key="edit_weight")
             edit_height = st.number_input("Height (cm)", min_value=1.0, step=0.5, value=float(current_user_data.get("height", 175)), key="edit_height")
@@ -840,7 +839,7 @@ def show_main_dashboard() -> None:
                     st.error("Name cannot be empty.")
                 else:
                     run_api_action(
-                        lambda: api_call("PUT", "/api/user", api_base_url, {
+                        lambda: api_call("PUT", "/api/user", api_base_url or DEFAULT_API_URL, {
                             "name": edit_name.strip(),
                             "age": int(edit_age),
                             "weight": float(edit_weight),
@@ -853,7 +852,7 @@ def show_main_dashboard() -> None:
                     )
 
         try:
-            sidebar_foods = api_call("GET", "/api/foods", api_base_url).get("foods", [])
+            sidebar_foods = api_call("GET", "/api/foods", api_base_url or DEFAULT_API_URL).get("foods", [])
         except requests.RequestException:
             sidebar_foods = []
 
@@ -877,7 +876,7 @@ def show_main_dashboard() -> None:
                     food_category = st.selectbox("Category", ["Food", "Drink", "Snack", "Dessert", "General"])
                 if st.form_submit_button("Add Food", width="stretch"):
                     run_api_action(
-                        lambda: api_call("POST", "/api/foods", api_base_url, {"name": food_name, "calories": int(food_calories), "category": food_category}),
+                        lambda: api_call("POST", "/api/foods", api_base_url or DEFAULT_API_URL, {"name": food_name, "calories": int(food_calories), "category": food_category}),
                         success_message="Food added!",
                     )
 
@@ -890,14 +889,14 @@ def show_main_dashboard() -> None:
                         st.error("Please confirm.")
                     else:
                         run_api_action(
-                            lambda: api_call("DELETE", "/api/users", api_base_url, {"name": delete_name}),
+                            lambda: api_call("DELETE", "/api/users", api_base_url or DEFAULT_API_URL, {"name": delete_name}),
                             success_message=f"Deleted '{delete_name}'.",
                             on_success=lambda _result: st.session_state.pop("logged_in_user", None) if st.session_state.get("logged_in_user") == delete_name else None,
                         )
 
     # Load data
     try:
-        foods, log_data, user = load_dashboard_data(api_base_url)
+        foods, log_data, user = load_dashboard_data(api_base_url or DEFAULT_API_URL)
     except requests.RequestException as err:
         st.error("Could not load data. Start Flask API and check URL.")
         st.info("Launch the backend with 'python run_backend.py' and refresh once it is running.")
@@ -994,7 +993,7 @@ def show_main_dashboard() -> None:
                     with ec_right:
                         if st.button("\u2716", key=f"del_food_{entry['food_name']}", help=f"Remove {entry['food_name']}"):
                             run_api_action(
-                                lambda: api_call("DELETE", "/api/log/entry", api_base_url, {"food_name": entry["food_name"]}),
+                                lambda: api_call("DELETE", "/api/log/entry", api_base_url or DEFAULT_API_URL, {"food_name": entry["food_name"]}),
                             )
             else:
                 st.info("No food logged yet today. Use the form to start tracking!")
@@ -1019,13 +1018,13 @@ def show_main_dashboard() -> None:
                 if st.form_submit_button("Log Food", width="stretch"):
                     if foods:
                         run_api_action(
-                            lambda: api_call("POST", "/api/log", api_base_url, {"food_name": selected_food, "quantity": int(quantity), "meal": meal_type}),
+                            lambda: api_call("POST", "/api/log", api_base_url or DEFAULT_API_URL, {"food_name": selected_food, "quantity": int(quantity), "meal": meal_type}),
                             success_message=f"Logged {quantity}x {selected_food}",
                             error_prefix="Could not log",
                         )
             if st.button("\U0001f504 Reset Day", width="stretch"):
                 run_api_action(
-                    lambda: api_call("DELETE", "/api/log", api_base_url),
+                    lambda: api_call("DELETE", "/api/log", api_base_url or DEFAULT_API_URL),
                     success_message="Day reset!",
                 )
 
@@ -1051,7 +1050,7 @@ def show_main_dashboard() -> None:
                     with ex_del_col:
                         if st.button("\u2716", key=f"del_ex_{idx}", help=f"Remove {ex['name']}"):
                             run_api_action(
-                                lambda: api_call("DELETE", "/api/exercise/entry", api_base_url, {"index": idx}),
+                                lambda: api_call("DELETE", "/api/exercise/entry", api_base_url or DEFAULT_API_URL, {"index": idx}),
                             )
             else:
                 st.info("No exercises logged today. Add one to offset your calories!")
@@ -1075,7 +1074,7 @@ def show_main_dashboard() -> None:
                 if st.form_submit_button("Log Exercise", width="stretch"):
                     if ex_name_input.strip():
                         run_api_action(
-                            lambda: api_call("POST", "/api/exercise", api_base_url, {"name": ex_name_input.strip(), "calories_burned": int(ex_cal), "duration_min": int(ex_dur)}),
+                            lambda: api_call("POST", "/api/exercise", api_base_url or DEFAULT_API_URL, {"name": ex_name_input.strip(), "calories_burned": int(ex_cal), "duration_min": int(ex_dur)}),
                             success_message=f"Logged {ex_name_input.strip()} (-{ex_cal} kcal)",
                         )
                     else:
@@ -1091,14 +1090,14 @@ def show_main_dashboard() -> None:
             glasses_to_add = st.number_input("Glasses to add", min_value=1, max_value=10, step=1, value=1, key="water_add")
             if st.button("\U0001f4a7 Log Water", width="stretch"):
                 run_api_action(
-                    lambda: api_call("POST", "/api/water", api_base_url, {"glasses": int(glasses_to_add)}),
+                    lambda: api_call("POST", "/api/water", api_base_url or DEFAULT_API_URL, {"glasses": int(glasses_to_add)}),
                     success_message=f"Added {glasses_to_add} glass(es)!",
                 )
             st.markdown("---")
             new_water_goal = st.number_input("Daily goal (glasses)", min_value=1, max_value=20, step=1, value=water_goal, key="water_goal_input")
             if st.button("Set Water Goal", width="stretch"):
                 run_api_action(
-                    lambda: api_call("PUT", "/api/water/goal", api_base_url, {"goal": int(new_water_goal)}),
+                    lambda: api_call("PUT", "/api/water/goal", api_base_url or DEFAULT_API_URL, {"goal": int(new_water_goal)}),
                     success_message=f"Goal \u2192 {new_water_goal} glasses",
                 )
 
@@ -1112,7 +1111,7 @@ def show_main_dashboard() -> None:
             new_target = st.number_input("Daily calorie target (kcal)", min_value=800, max_value=10000, step=50, value=current_target, key="goal_target")
             if st.button("Save Calorie Goal", width="stretch"):
                 run_api_action(
-                    lambda: api_call("PUT", "/api/user", api_base_url, {"name": user.get("name", ""), "age": int(user.get("age", 20)), "weight": float(user.get("weight", 70)), "height": float(user.get("height", 175)), "goal": user.get("goal", "Maintain"), "daily_calorie_target": int(new_target)}),
+                    lambda: api_call("PUT", "/api/user", api_base_url or DEFAULT_API_URL, {"name": user.get("name", ""), "age": int(user.get("age", 20)), "weight": float(user.get("weight", 70)), "height": float(user.get("height", 175)), "goal": user.get("goal", "Maintain"), "daily_calorie_target": int(new_target)}),
                     success_message=f"Goal \u2192 {new_target} kcal",
                 )
             st.metric("Current Goal", f"{current_target} kcal")
@@ -1275,7 +1274,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    if not st.runtime.exists() and os.environ.get("STREAMLIT_RUN_FROM_CLI") != "true":
+    # Check if running directly vs via Streamlit
+    if os.environ.get("STREAMLIT_RUN_FROM_CLI") != "true":
         frontend_hint = "python run_frontend.py"
         backend_hint = "python run_backend.py"
         print(f"This is a Streamlit app. Start the backend with {backend_hint}, then run the frontend with {frontend_hint}.")

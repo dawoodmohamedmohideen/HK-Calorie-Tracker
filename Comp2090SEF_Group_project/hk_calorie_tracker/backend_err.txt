@@ -1,6 +1,0 @@
-Traceback (most recent call last):
-  File "C:\Users\M.M.Dawood\Documents\hk_calorie_tracker\HK-Calorie-Tracker\Comp2090SEF_Group_project\hk_calorie_tracker\api_server.py", line 15, in <module>
-    from database import FoodDatabase
-  File "C:\Users\M.M.Dawood\Documents\hk_calorie_tracker\HK-Calorie-Tracker\Comp2090SEF_Group_project\hk_calorie_tracker\database.py", line 3, in <module>
-    from food import HKFood
-ImportError: cannot import name 'HKFood' from 'food' (C:\Users\M.M.Dawood\Documents\hk_calorie_tracker\HK-Calorie-Tracker\Comp2090SEF_Group_project\hk_calorie_tracker\food.py). Did you mean: 'Food'?
