@@ -19,7 +19,7 @@ import requests
 import streamlit as st
 
 
-DEFAULT_API_URL = "http://127.0.0.1:5050"
+DEFAULT_API_URL = "http://127.0.0.1:5051"
 
 TIPS = [
     ("\U0001f966", "Eat at least 5 servings of fruits & veggies daily for optimal health."),
