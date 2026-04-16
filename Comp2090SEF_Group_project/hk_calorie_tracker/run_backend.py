@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import sys
 from pathlib import Path
 
@@ -17,15 +18,36 @@ def maybe_reexec_with_local_venv() -> None:
         os.execv(str(local_python), [str(local_python), str(Path(__file__).resolve()), *sys.argv[1:]])
 
 
+def find_free_port(preferred: int = 5050) -> int:
+    """Return preferred port if free, otherwise find the next available one."""
+    for port in range(preferred, preferred + 100):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    # Fall back to OS-assigned port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 def main() -> None:
     maybe_reexec_with_local_venv()
     script_dir = Path(__file__).resolve().parent
     os.chdir(script_dir)
-    os.environ.setdefault("HK_TRACKER_API_PORT", "5050")
+
+    preferred = int(os.environ.get("HK_TRACKER_API_PORT", "5050"))
+    port = find_free_port(preferred)
+
+    # Write the port to a file so the frontend can discover it
+    port_file = script_dir / "api_port.txt"
+    port_file.write_text(str(port))
 
     from api_server import app
 
-    port = int(os.environ.get("HK_TRACKER_API_PORT", "5050"))
+    print(f" * Backend port: {port}", flush=True)
     venv_dir = str(script_dir / ".venv")
     app.run(host="0.0.0.0", port=port, debug=True, exclude_patterns=[venv_dir])
 

@@ -11,6 +11,7 @@ import math
 import os
 import random
 import re
+from pathlib import Path
 from typing import Any, Callable
 
 import altair as alt
@@ -20,6 +21,19 @@ import streamlit as st
 
 
 DEFAULT_API_URL = "http://127.0.0.1:5050"
+
+
+def _get_api_url() -> str:
+    """Read the backend port from api_port.txt written by run_backend.py."""
+    try:
+        port_file = Path(__file__).resolve().parent / "api_port.txt"
+        if port_file.exists():
+            port = port_file.read_text().strip()
+            if port.isdigit():
+                return f"http://127.0.0.1:{port}"
+    except Exception:
+        pass
+    return DEFAULT_API_URL
 
 TIPS = [
     ("\U0001f966", "Eat at least 5 servings of fruits & veggies daily for optimal health."),
@@ -700,11 +714,11 @@ def show_login_screen() -> None:
             <div class="login-subtitle">Your personal Hong Kong nutrition companion</div>
         </div>""", unsafe_allow_html=True)
 
-        api_base_url = DEFAULT_API_URL
+        api_base_url = _get_api_url()
         try:
             users = load_users(api_base_url)
         except requests.RequestException:
-            st.error("Cannot connect to API \u2014 make sure Flask backend is running on port 5050.")
+            st.error(f"Cannot connect to API — make sure Flask backend is running. (tried {api_base_url})")
             with st.expander("\u2699\ufe0f Custom API URL"):
                 api_base_url = st.text_input("API URL", value=DEFAULT_API_URL, key="login_api_url")
             return
