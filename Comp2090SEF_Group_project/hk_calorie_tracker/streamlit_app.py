@@ -1274,11 +1274,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # Check if running directly vs via Streamlit
-    if os.environ.get("STREAMLIT_RUN_FROM_CLI") != "true":
-        frontend_hint = "python run_frontend.py"
-        backend_hint = "python run_backend.py"
-        print(f"This is a Streamlit app. Start the backend with {backend_hint}, then run the frontend with {frontend_hint}.")
-    else:
-        main()
+    main()
 
