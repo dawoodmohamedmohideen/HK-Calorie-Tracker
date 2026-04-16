@@ -1,3 +1,39 @@
-tracker_state.db
-tracker_state.json
+# Virtual Environment
+.venv/
+venv/
+env/
+ENV/
+
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Database/State
+*.db
+*.sqlite3
+tracker_state.json
