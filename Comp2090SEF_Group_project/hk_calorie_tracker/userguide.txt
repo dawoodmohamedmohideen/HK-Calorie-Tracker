@@ -1,0 +1,272 @@
+HK Calorie Tracker User Guide
+
+Overview
+
+HK Calorie Tracker is a comprehensive nutrition and fitness tracking application inspired by Hong Kong cuisine and culture. It combines a modern web interface with a local AI health coach to help you monitor your daily calorie intake, exercise, hydration, and overall wellness goals.
+
+Features
+
+- Multi-profile Support: Create and manage multiple user profiles
+- Hong Kong Food Database: Pre-loaded with authentic Hong Kong foods and dishes
+- Custom Food Creation: Add your own foods to the database
+- Meal Categorization: Track breakfast, lunch, dinner, snacks, and general meals
+- Exercise Tracking: Log workouts and calories burned
+- Water Intake Monitoring: Track daily hydration with customizable goals
+- Goal Planning: Set daily calorie targets and track BMI
+- Weekly Insights: View trends and consistency over 7 days
+- AI Health Coach: Get personalized nutrition and fitness advice
+- Data Export: Download daily summaries and weekly history as text/CSV files
+
+System Requirements
+
+- Python: 3.10 or higher
+- Operating System: Windows, macOS, or Linux
+- RAM: Minimum 2GB
+- Storage: 100MB free space
+
+Installation
+
+Step 1: Install Python
+Ensure you have Python 3.10 or later installed. You can download it from [python.org](https://python.org).
+
+Step 2: Download the Application
+Download or clone the HK Calorie Tracker project to your local machine.
+
+Step 3: Set Up Virtual Environment
+Navigate to the hk_calorie_tracker folder and create a virtual environment:
+
+cd hk_calorie_tracker
+python -m venv .venv
+
+Step 4: Activate Virtual Environment
+- Windows:
+  .venv\Scripts\activate
+- macOS/Linux:
+  source .venv/bin/activate
+
+Step 5: Install Dependencies
+Install the required packages:
+
+python -m pip install -r requirements.txt
+
+Running the Application
+
+Method 1: Separate Backend and Frontend (Recommended)
+
+1. Start the Backend API:
+   python run_backend.py
+   The backend will start on http://127.0.0.1:5050
+
+2. Start the Frontend UI (in a separate terminal):
+   python run_frontend.py
+   The Streamlit app will open in your browser at http://localhost:8501
+
+Method 2: Direct Streamlit Launch
+
+python -m streamlit run streamlit_app.py
+
+Note: When using Method 2, ensure the backend is running first, or configure the API URL in the sidebar.
+
+Getting Started
+
+Creating Your First Profile
+
+1. Open the application in your browser
+2. You'll see a login screen - this is where you create your first profile
+3. Enter your details:
+   - Name: Your profile name
+   - Age: Your age in years
+   - Weight: Your current weight in kilograms
+   - Height: Your height in centimeters
+   - Goal: Choose from "Maintain", "Lose", or "Gain"
+4. Click "Create Profile" to get started
+
+Understanding the Dashboard
+
+The main dashboard shows:
+- Calorie Ring: Visual progress toward your daily goal
+- Daily Stats: Calories eaten, remaining, burned, and water intake
+- Streak Counter: Consecutive days of tracking
+- Motivational Messages: Daily health tips and encouragement
+
+Using the Application
+
+Food Diary Tab
+
+Logging Food
+1. Go to the "Food Diary" tab
+2. Use the search box to find foods in the database
+3. Select a food from the dropdown
+4. Enter quantity (number of servings)
+5. Choose meal type (Breakfast, Lunch, Dinner, Snack, General)
+6. Click "Log Food"
+
+Adding Custom Foods
+1. In the sidebar, expand "Add Food"
+2. Enter food name, calories per serving, and category
+3. Click "Add Food"
+
+Managing Logged Food
+- View all logged foods in the diary
+- Remove individual entries by clicking the "✖" button next to each item
+- Reset the entire day with "Reset Day" button
+
+Exercise Tab
+
+Logging Exercise
+1. Go to the "Exercise" tab
+2. Choose from preset activities or select "Custom"
+3. For presets: Select an activity (e.g., "Running (30 min)")
+4. For custom: Enter activity name, calories burned, and duration
+5. Click "Log Exercise"
+
+Viewing Exercise Summary
+- See total calories burned
+- View list of all activities for the day
+- Remove exercises with the "✖" button
+
+Water Tab
+
+Tracking Hydration
+1. Go to the "Water" tab
+2. Enter number of glasses to add (1 glass = 250ml)
+3. Click "Log Water"
+4. View your progress toward the daily goal
+
+Adjusting Water Goal
+1. Enter new daily goal in glasses
+2. Click "Set Water Goal"
+
+Goals & BMI Tab
+
+Setting Calorie Goals
+1. Enter your desired daily calorie target
+2. Click "Save Calorie Goal"
+
+BMI Calculator
+1. Enter your height and weight
+2. Click "Calculate BMI"
+3. View your BMI score and category
+
+Insights Tab
+
+Weekly History
+- View 7-day calorie trend chart
+- See daily breakdown table
+- Check weekly consistency percentage
+
+Personalized Recommendations
+- Get tailored advice based on your tracking data
+- Receive tips for improvement
+
+Data Export
+- Download daily summary as text file
+- Download weekly history as CSV file
+
+AI Chat Tab
+
+Using the Health Coach
+- Ask questions about nutrition, exercise, or your progress
+- Get meal ideas, protein tips, and health advice
+- Use quick action buttons for common queries:
+  - "Calories": Check today's intake
+  - "Protein": Get protein recommendations
+  - "Meal idea": Receive healthy meal suggestions
+  - "Summary": Get daily progress overview
+
+Managing Multiple Profiles
+
+Creating Additional Profiles
+1. In the sidebar, expand "Create profile"
+2. Fill in the profile details
+3. Click "Create profile"
+
+Switching Profiles
+1. Use the "Switch profile" dropdown in the sidebar
+2. Select the desired profile
+3. Click "Switch profile"
+
+Editing Profiles
+1. Expand "Edit Profile" in the sidebar
+2. Modify any details
+3. Click "Save Changes"
+
+Deleting Profiles
+1. Expand "Delete profile" in the sidebar
+2. Select profile to delete
+3. Check "Confirm deletion"
+4. Click "Delete"
+
+Data Management
+
+Automatic Saving
+- All data is automatically saved to a local SQLite database (tracker_state.db)
+- Data persists between application restarts
+
+Exporting Data
+- Daily Summary: Text file with today's complete nutrition data
+- Weekly History: CSV file with 7 days of calorie data
+
+Resetting Data
+- Use "Reset Day" to clear all food logs for the current day
+- Individual entries can be removed without affecting other data
+
+Troubleshooting
+
+Backend Connection Issues
+- Ensure the Flask backend is running on port 5050
+- Check the API URL in the sidebar (should be http://127.0.0.1:5050)
+- Restart both backend and frontend if connection fails
+
+Data Not Loading
+- Check that the database file tracker_state.db exists
+- Ensure proper file permissions for database access
+- Try restarting the application
+
+Port Conflicts
+- If port 5050 is in use, set a custom port:
+  set HK_TRACKER_API_PORT=5051
+  python run_backend.py
+
+Performance Issues
+- Close other applications to free up memory
+- Ensure you have at least 2GB RAM available
+- Restart the application if it becomes unresponsive
+
+Tips for Success
+
+Daily Tracking Habits
+- Log food as you eat for accurate tracking
+- Include all beverages and snacks
+- Track exercise soon after completion
+- Log water intake throughout the day
+
+Goal Setting
+- Start with realistic calorie targets
+- Adjust goals based on your progress and energy levels
+- Use BMI calculator to track body composition changes
+
+Using the AI Coach
+- Ask specific questions for detailed advice
+- Use the coach for meal planning and recipe ideas
+- Request workout suggestions based on your goals
+
+Weekly Review
+- Check your consistency percentage regularly
+- Analyze trends in the insights tab
+- Adjust habits based on weekly patterns
+
+Privacy and Security
+
+- All data is stored locally on your device
+- No data is transmitted to external servers
+- Database files are not encrypted (use at your own risk)
+- Back up important data regularly
+
+Support
+
+For technical issues or questions:
+1. Check this user guide first
+2. Review the README.md file for additional technical details
+3. Ensure all dependencies are properly installed
+4. Check the troubleshooting section above
