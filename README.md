@@ -15,3 +15,11 @@ Mohamed Mohideen Dawood(13776731)
 Wu Chun Yin(13879941)
 
 Pun Anjuli(13880208)
+
+## Task 1 Video
+
+[Watch Task 1 Video](https://drive.google.com/file/d/1AD2LTuXQQK6ngAY_mUt5aq7S7KMmytko/view?usp=drive_link)
+
+## Task 2 Video
+
+[Watch Task 2 Video](https://drive.google.com/file/d/1arVOA_xzEFlEsKIZ1kBQZM94iUQFjzfj/view?usp=drive_link)
