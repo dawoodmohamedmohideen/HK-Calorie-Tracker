@@ -51,21 +51,13 @@ python -m pip install -r requirements.txt
 
 Running the Application
 
-Method 1: Separate Backend and Frontend (Recommended)
+Running the frontend is all you need to start the program. The frontend will automatically launch the backend in the background.
 
-1. Start the Backend API:
-   python run_backend.py
-   The backend will start on http://127.0.0.1:5050
-
-2. Start the Frontend UI (in a separate terminal):
+Start the Frontend:
    python run_frontend.py
    The Streamlit app will open in your browser at http://localhost:8501
 
-Method 2: Direct Streamlit Launch
-
-python -m streamlit run streamlit_app.py
-
-Note: When using Method 2, ensure the backend is running first, or configure the API URL in the sidebar.
+That's it! No separate backend startup is required.
 
 Getting Started
 
@@ -214,9 +206,9 @@ Resetting Data
 Troubleshooting
 
 Backend Connection Issues
-- Ensure the Flask backend is running on port 5050
+- The backend starts automatically when you run the frontend
+- If connection issues occur, restart the frontend using: python run_frontend.py
 - Check the API URL in the sidebar (should be http://127.0.0.1:5050)
-- Restart both backend and frontend if connection fails
 
 Data Not Loading
 - Check that the database file tracker_state.db exists
